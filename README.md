@@ -25,7 +25,7 @@ REB_green-remodeling-project
 │   ├── notebooks/                 # 분석/가공을 위한 Jupyter 노트북
 │   ├── src/                       # Python 코드 (예: 데이터 처리 함수)
 │   ├── README.md                  # 작업 설명 (예: 데이터 출처, 매칭 방법)
-│   └── result/                    # 산출물, 가공된 데이터 (Git 제외 대상 권장)
+│   └── result/                    # 산출물, 가공된 데이터 (Git 제외 대상)
 │
 ├── 02_other_task_example/         # 추후 다른 작업 폴더
 │   ├── data/                      # 데이터 폴더
