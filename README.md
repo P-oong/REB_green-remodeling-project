@@ -1,4 +1,5 @@
 
+```markdown
 # 한국부동산원 그린리모델링 데이터 분석 프로젝트
 
 ## 개요
@@ -13,7 +14,7 @@
 | 02   | [추후 작업 예시](./02_other_task_example)         | 새로운 데이터 분석 작업 예시                                  |
 
 ## 프로젝트 구조
-
+```bash
 REB_green-remodeling-project
 │
 ├── 00_environment/                # 공통 환경 파일 및 가이드
@@ -37,21 +38,21 @@ REB_green-remodeling-project
 │
 ├── .gitignore                     # 전역 무시 파일
 └── README.md                      # 프로젝트 전체 설명 (현재 파일)
-
+```
 
 ## 환경 구축
 - Conda 환경 파일: [00_environment/environment.yml](./00_environment/environment.yml)
 - pip 패키지 파일 (선택): [00_environment/requirements.txt](./00_environment/requirements.txt)
 
-
+```bash
 # Conda 환경 설치
 conda env create -f 00_environment/environment.yml
 
 # (선택) pip로 설치할 경우
 pip install -r 00_environment/requirements.txt
-
+```
 
 ## 주의 사항
 - **데이터 파일(`data/`)**과 **결과 파일(`result/`)**은 `.gitignore`로 Git에 포함되지 않도록 설정되어 있습니다.
-- API 키, 비밀 설정 등은 `.env` 파일로 관리하며 Git에는 포함하지 않습니다.
-
+- **API 키**, 비밀 설정 등은 `.env` 파일로 관리하며 Git에는 포함하지 않습니다.
+```
