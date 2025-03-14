@@ -53,4 +53,4 @@ pip install -r 00_environment/requirements.txt
 ## 주의 사항
 - **데이터 파일(`data/`)**과 **결과 파일(`result/`)**은 `.gitignore`로 Git에 포함되지 않도록 설정되어 있습니다.
 - **API 키**, 비밀 설정 등은 `.env` 파일로 관리하며 Git에는 포함하지 않습니다.
-```
+
