@@ -1,0 +1,13 @@
+# 공통 무시
+__pycache__/
+*.py[cod]
+*.so
+.ipynb_checkpoints/
+.env
+.vscode/
+.idea/
+.DS_Store
+
+# 데이터/결과 무시 (각 작업 폴더 공통)
+*/data/
+*/result/
