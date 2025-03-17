@@ -63,14 +63,26 @@ def compute_rule_score_details(e_row, c_row):
     e_row: EBD 한 행
     c_row: BD 후보 한 행
     항목별 점수(usage_score, text_score, area_score) + 상세사유
-    반환값: (total_score, rule_details, usage_s, text_s, area_s)
+    
+    반환: (total_score, rule_details, usage_s, text_s, area_s)
     """
-    details = {}
-    reasons = {}
 
-    # (1) 용도 점수
+    # (1) 미리 키를 0으로 초기화
+    details = {
+        "usage_score": 0,
+        "text_score": 0,
+        "area_score": 0
+    }
+    # 사유도 마찬가지
+    reasons = {
+        "usage": "N/A",
+        "text": "N/A",
+        "area": "N/A"
+    }
+
+    # (2) 용도 점수
     pur_nm = str(e_row.get('PUR_NM','')).lower()
-    etc_purps = str(c_row.get('ETC_PURPS','')).lower()  # MAIN_USE 제거
+    etc_purps = str(c_row.get('ETC_PURPS','')).lower()  # MAIN_USE는 없는 상황
     if pur_nm and pur_nm in etc_purps:
         details["usage_score"] = 1
         reasons["usage"] = "PUR_NM in ETC_PURPS"
@@ -78,7 +90,7 @@ def compute_rule_score_details(e_row, c_row):
         details["usage_score"] = 0
         reasons["usage"] = "PUR_NM mismatch"
 
-    # (2) 텍스트 결합 점수 (OFFICE_NM + BLD_NM vs BLD_NM + DONG_NM)
+    # (3) 텍스트 결합 점수
     combined_ebd = (str(e_row.get('OFFICE_NM','')) + " " + str(e_row.get('BLD_NM',''))).strip().lower()
     combined_bd = (str(c_row.get('BLD_NM','')) + " " + str(c_row.get('DONG_NM',''))).strip().lower()
 
@@ -89,11 +101,11 @@ def compute_rule_score_details(e_row, c_row):
         details["text_score"] = 0
         reasons["text"] = "text mismatch"
 
-    # (3) 면적 점수
+    # (4) 면적 점수
     area_str = e_row.get('AREA','')
     totarea = float(c_row.get('TOTAREA',0))
     lower, upper = parse_area_text(area_str)
-    if lower is None and upper is None:
+    if (lower is None) and (upper is None):
         details["area_score"] = 0
         reasons["area"] = "Area range parse failed"
     else:
@@ -106,17 +118,16 @@ def compute_rule_score_details(e_row, c_row):
             details["area_score"] = 0
             reasons["area"] = f"{totarea} not in range"
 
-    # 총점
+    # (5) 총점 및 상세 문자열
     total_score = sum(details.values())
 
-    # rule_details 문자열
-    rule_details = "; ".join([f"{k}:{details[k]}({reasons[k]})" for k in details])
+    rule_details = "; ".join([
+        f"{k}:{details[k]}({reasons[k.split('_')[0]]})"
+        for k in ["usage_score", "text_score", "area_score"]
+    ])
 
-    usage_s = details.get("usage_score", 0)
-    text_s = details.get("text_score", 0)
-    area_s = details.get("area_score", 0)
+    return total_score, rule_details, details["usage_score"], details["text_score"], details["area_score"]
 
-    return total_score, rule_details, usage_s, text_s, area_s
 
 def rule_based_match_multi(e_row, candidate_df):
     """
