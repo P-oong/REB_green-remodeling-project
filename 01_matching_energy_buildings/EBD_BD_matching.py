@@ -1,7 +1,7 @@
 import os
 import json
 import pandas as pd
-import openai
+from openai import OpenAI
 from dotenv import load_dotenv
 
 # 1) 환경 변수 로드 & OpenAI 키
@@ -310,17 +310,17 @@ def match_buildings(ebd_df, bd_df, openai_api_key):
         mgmt_pk_1st, detail_str, usage_s, text_s, area_s = rule_based_match_multi(row, subset)
         if mgmt_pk_1st is not None:
             ebd_df.at[idx, 'MATCHED_PK'] = mgmt_pk_1st
-            ebd_df.at[idx, 'MATCH_STAGE'] = 1
+            ebd_df.at[idx, 'MATCH_STAGE'] = 2
             ebd_df.at[idx, 'RULE_DETAILS'] = detail_str
             ebd_df.at[idx, 'USAGE_SCORE'] = usage_s
             ebd_df.at[idx, 'TEXT_SCORE'] = text_s
             ebd_df.at[idx, 'AREA_SCORE'] = area_s
         else:
             # 1차 실패 → GPT
-            best_gpt, reason_gpt = gpt_based_match(row, subset, openai_api_key)
+            best_gpt, reason_gpt = gpt_based_match(row, subset)
             if best_gpt is not None:
                 ebd_df.at[idx, 'MATCHED_PK'] = best_gpt
-                ebd_df.at[idx, 'MATCH_STAGE'] = 2
+                ebd_df.at[idx, 'MATCH_STAGE'] = 3
                 ebd_df.at[idx, 'GPT_REASON'] = reason_gpt
                 ebd_df.at[idx, 'USAGE_SCORE'] = 0
                 ebd_df.at[idx, 'TEXT_SCORE'] = 0
@@ -328,7 +328,7 @@ def match_buildings(ebd_df, bd_df, openai_api_key):
             else:
                 # 최종 실패
                 ebd_df.at[idx, 'MATCHED_PK'] = None
-                ebd_df.at[idx, 'MATCH_STAGE'] = 0
+                ebd_df.at[idx, 'MATCH_STAGE'] = 99
                 ebd_df.at[idx, 'GPT_REASON'] = reason_gpt
                 ebd_df.at[idx, 'USAGE_SCORE'] = 0
                 ebd_df.at[idx, 'TEXT_SCORE'] = 0
