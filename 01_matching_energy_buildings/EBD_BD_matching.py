@@ -252,7 +252,7 @@ def gpt_based_match(e_row, candidate_df):
     try:
         # Structured Outputs를 사용하여 GPT 응답 파싱 (beta 엔드포인트 사용)
         completion = openai.beta.chat.completions.parse(
-            model="gpt-4o-mini-2024-08-06",  # 모델 이름 재확인 필요 (Structured Outputs 지원 모델)
+            model="gpt-4o-mini",  # 모델 이름 재확인 필요 (Structured Outputs 지원 모델)
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
