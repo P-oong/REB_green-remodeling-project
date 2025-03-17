@@ -224,27 +224,28 @@ def build_user_prompt(e_row, candidate_df):
                 """
     return final_prompt
 
-def gpt_based_match(e_row, candidate_df, openai_api_key):
-    """
-    2차 GPT 매칭 로직
-    """
-    import openai
-    openai.api_key = openai_api_key
+client = OpenAI(api_key=openai_api_key)
 
+def gpt_based_match(e_row, candidate_df):
+    """
+    최신 openai 패키지(v1.0.0 이상) 기준 GPT 매칭 수행
+    """
     if candidate_df.empty:
         return None, "No candidate"
 
     user_content = build_user_prompt(e_row, candidate_df)
 
     system_prompt = """
-            You are an expert in Korean real estate and building registry.
-            Your task is to match the 'energy report building' to the correct 'individual building registry (표제부)'.
-            You MUST select only from the candidate building registries that share the same RECAP_PK.
-            Do not guess beyond this group. If unsure, respond with "no_match".
-            """
+        You are an expert in Korean real estate and building registry.
+        Your task is to match the 'energy report building' to the correct 'individual building registry (표제부)'.
+        You MUST select only from the candidate building registries that share the same RECAP_PK.
+        Do not guess beyond this group. If unsure, respond with "no_match".
+    """
+
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",  # gpt-4o-mini 모델
+        # 최신 방식의 API 호출
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # 또는 gpt-4o
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
@@ -252,14 +253,17 @@ def gpt_based_match(e_row, candidate_df, openai_api_key):
             temperature=0.0,
             max_tokens=600
         )
-        content = response['choices'][0]['message']['content'].strip()
-        result = json.loads(content)
-        best = result.get("best_match","no_match")
-        reason = result.get("reason","")
+        # 최신 버전 응답 처리 방식
+        result_str = response.choices[0].message.content.strip()
+        result = json.loads(result_str)
+        best = result.get("best_match", "no_match")
+        reason = result.get("reason", "")
+        
         if best == "no_match":
             return None, reason
         else:
             return best, reason
+
     except Exception as e:
         return None, f"GPT Error: {e}"
 
