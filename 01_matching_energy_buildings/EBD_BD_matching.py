@@ -70,7 +70,7 @@ def compute_rule_score_details(e_row, c_row):
 
     # (1) 용도 점수
     pur_nm = str(e_row.get('PUR_NM','')).lower()
-    etc_purps = str(c_row.get('ETC_PURPS', c_row.get('MAIN_USE',''))).lower()
+    etc_purps = str(c_row.get('ETC_PURPS','')).lower()  # MAIN_USE 제거
     if pur_nm and pur_nm in etc_purps:
         details["usage_score"] = 1
         reasons["usage"] = "PUR_NM in ETC_PURPS"
@@ -78,7 +78,7 @@ def compute_rule_score_details(e_row, c_row):
         details["usage_score"] = 0
         reasons["usage"] = "PUR_NM mismatch"
 
-    # (2) 텍스트 결합 점수 (OFFICE_NM + BLD_NM) vs (BLD_NM + DONG_NM)
+    # (2) 텍스트 결합 점수 (OFFICE_NM + BLD_NM vs BLD_NM + DONG_NM)
     combined_ebd = (str(e_row.get('OFFICE_NM','')) + " " + str(e_row.get('BLD_NM',''))).strip().lower()
     combined_bd = (str(c_row.get('BLD_NM','')) + " " + str(c_row.get('DONG_NM',''))).strip().lower()
 
@@ -183,10 +183,11 @@ def build_user_prompt(e_row, candidate_df):
     cand_text = "[Candidate Building Registry]\n"
     for i, c_row in candidate_df.iterrows():
         cmb_bd = (str(c_row.get('BLD_NM', '')) + " " + str(c_row.get('DONG_NM', ''))).strip()
+        usage_bd = str(c_row.get('ETC_PURPS',''))  # MAIN_USE 제거
         cand_text += f"""
                     {i+1}. [MGM_BLD_PK: {c_row['MGM_BLD_PK']}]
                     Combined Name: {cmb_bd}
-                    Usage: {c_row.get('ETC_PURPS', c_row.get('MAIN_USE',''))}
+                    Usage: {usage_bd}
                     TOTAREA: {c_row.get('TOTAREA', '')}
                     """
 
@@ -252,24 +253,22 @@ def gpt_based_match(e_row, candidate_df, openai_api_key):
         return None, f"GPT Error: {e}"
 
 # ------------------------------------------------
-# 4) 최종 매칭 함수
+# 4) 최종 매칭 함수 (점수 칼럼 저장 추가)
 # ------------------------------------------------
 def match_buildings(ebd_df, bd_df, openai_api_key):
     """
     ebd_df: EBD(에너지 보고) 데이터
-    bd_df: BD(건축물대장) 데이터
+    bd_df: BD(건축물대장) 데이터 (MAIN_USE 없음)
     openai_api_key: GPT 호출용 API키
 
     반환: ebd_df에 [MATCHED_PK, MATCH_STAGE, RULE_DETAILS, GPT_REASON,
-                     USAGE_SCORE, TEXT_SCORE, AREA_SCORE] 열 추가
+                    USAGE_SCORE, TEXT_SCORE, AREA_SCORE] 열 추가
     """
     # 결과 컬럼 초기화
     ebd_df['MATCHED_PK'] = None
     ebd_df['MATCH_STAGE'] = 0
     ebd_df['RULE_DETAILS'] = ""
     ebd_df['GPT_REASON'] = ""
-
-    # 새로 추가: usage, text, area 점수 칼럼
     ebd_df['USAGE_SCORE'] = 0
     ebd_df['TEXT_SCORE'] = 0
     ebd_df['AREA_SCORE'] = 0
@@ -278,42 +277,36 @@ def match_buildings(ebd_df, bd_df, openai_api_key):
         recap = row['RECAP_PK']
         multi_yn = row['MULTI_YN']
 
-        # (예외처리) RECAP_PK 또는 MULTI_YN 가 NA면 스킵
+        # RECAP_PK 또는 MULTI_YN NA → 스킵
         if pd.isna(recap) or pd.isna(multi_yn):
             ebd_df.at[idx, 'GPT_REASON'] = "RECAP_PK or MULTI_YN is NA, skipped."
-            continue  # 다음 row로 넘어감
+            continue
 
-        # BD 후보 필터링
+        # BD 후보
         subset = bd_df[bd_df['RECAP_PK'] == recap]
 
         # (1) MULTI_YN='N' & 후보가 1건이면 바로 매칭
         if multi_yn == 'N' and len(subset) == 1:
             ebd_df.at[idx, 'MATCHED_PK'] = subset.iloc[0]['MGM_BLD_PK']
             ebd_df.at[idx, 'MATCH_STAGE'] = 1
-            # 규칙점수는 그대로 0으로 둠
             continue
 
-        # (2) 1차 규칙 기반 매칭
+        # (2) 1차 규칙
         mgmt_pk_1st, detail_str, usage_s, text_s, area_s = rule_based_match_multi(row, subset)
         if mgmt_pk_1st is not None:
-            # 1차 매칭 성공
             ebd_df.at[idx, 'MATCHED_PK'] = mgmt_pk_1st
             ebd_df.at[idx, 'MATCH_STAGE'] = 1
             ebd_df.at[idx, 'RULE_DETAILS'] = detail_str
-
-            # 점수 저장
             ebd_df.at[idx, 'USAGE_SCORE'] = usage_s
             ebd_df.at[idx, 'TEXT_SCORE'] = text_s
             ebd_df.at[idx, 'AREA_SCORE'] = area_s
         else:
-            # 1차 매칭 실패 → 2차 GPT
+            # 1차 실패 → GPT
             best_gpt, reason_gpt = gpt_based_match(row, subset, openai_api_key)
             if best_gpt is not None:
                 ebd_df.at[idx, 'MATCHED_PK'] = best_gpt
                 ebd_df.at[idx, 'MATCH_STAGE'] = 2
                 ebd_df.at[idx, 'GPT_REASON'] = reason_gpt
-
-                # GPT 매칭이면 규칙점수는 0으로
                 ebd_df.at[idx, 'USAGE_SCORE'] = 0
                 ebd_df.at[idx, 'TEXT_SCORE'] = 0
                 ebd_df.at[idx, 'AREA_SCORE'] = 0
@@ -329,16 +322,16 @@ def match_buildings(ebd_df, bd_df, openai_api_key):
     return ebd_df
 
 def main():
-    # 1) EBD 데이터 (15개 샘플) 읽기
+    # EBD 15개 샘플
     ebd_df = pd.read_csv("./data/EBD_TABLE.csv", encoding='cp949').head(15)
 
-    # 2) BD 데이터 (전체) 읽기
+    # BD 전체 (MAIN_USE 없음, ETC_PURPS만 있음)
     bd_df = pd.read_csv("./data/BD_REGIST_no_remove3000.csv", encoding='cp949')
 
-    # 3) 매칭 수행
+    # 매칭
     result_df = match_buildings(ebd_df, bd_df, openai_api_key)
 
-    # 4) 결과 CSV 저장
+    # 결과 저장
     result_df.to_csv("./result/matching_result.csv", index=False)
     print("Done. See matching_result.csv")
 
