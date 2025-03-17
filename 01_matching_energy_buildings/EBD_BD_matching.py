@@ -352,7 +352,7 @@ def main():
     result_df = match_buildings(ebd_df, bd_df)
 
     # 결과 저장
-    result_df.to_csv("./result/matching_result.csv", index=False)
+    result_df.to_csv("./result/matching_result.csv", index=False, quoting=1)
     print("Done. See matching_result.csv")
 
 if __name__ == "__main__":
