@@ -5,7 +5,7 @@ import openai
 from dotenv import load_dotenv
 
 load_dotenv()  # .env 파일 로드
-openai.api_key = os.getenv("OPENAI_API_KEY")  # OpenAI API 키
+openai_api_key = os.getenv("OPENAI_API_KEY")  # OpenAI API 키
 #langsmith_api_key = os.getenv("LANGSMITH_API_KEY")  # 필요시 사용
 
 # ------------------------------------------------
