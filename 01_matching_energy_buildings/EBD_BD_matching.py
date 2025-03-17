@@ -221,7 +221,7 @@ def build_user_prompt(e_row, candidate_df):
                 Format your response as JSON:
                 {{
                 "best_match": "MGM_BLD_PK or no_match",
-                "reason": "Why matched or no match"
+                "reason": "Why matched or no match. 매칭 사유(reason)를 **한국어**로 작성해주세요."
                 }}
 
                 Note: All candidate buildings share the same RECAP_PK as the energy report building ({e_row.get('RECAP_PK')}). Therefore, match only within this group.
@@ -247,6 +247,8 @@ def gpt_based_match(e_row, candidate_df):
         Your task is to match the 'energy report building' to the correct 'individual building registry (표제부)'.
         You MUST select only from the candidate building registries that share the same RECAP_PK.
         Do not guess beyond this group. If unsure, respond with "no_match".
+        
+        Please provide your explanation (reason) in Korean.
     """
 
     try:
@@ -352,7 +354,7 @@ def main():
     result_df = match_buildings(ebd_df, bd_df)
 
     # 결과 저장
-    result_df.to_csv("./result/matching_result.csv", index=False, quoting=1)
+    result_df.to_csv("./result/matching_result_o1.csv", index=False, quoting=1)
     print("Done. See matching_result.csv")
 
 if __name__ == "__main__":
