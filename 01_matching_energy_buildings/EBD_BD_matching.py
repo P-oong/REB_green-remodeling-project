@@ -1,12 +1,15 @@
 import os
 import json
 import pandas as pd
-from openai import OpenAI
+import openai
 from dotenv import load_dotenv
 
-# 1) 환경 변수 로드 & OpenAI 키
+# 1) 환경 변수 로드 & OpenAI 키 체크
 load_dotenv()
-openai_api_key = os.getenv("OPENAI_API_KEY")  # OpenAI API 키 변수
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    raise ValueError("OPENAI_API_KEY environment variable not set.")
+openai.api_key = openai_api_key
 
 # ------------------------------------------------
 # 1) 면적 텍스트 전처리 함수
@@ -27,8 +30,6 @@ def parse_area_text(area_str):
     # A) "이상~" 있는 형태: "3000이상~5000미만"
     if "이상~" in s:
         parts = s.split("이상~")
-        # parts[0] = "3000"
-        # parts[1] = "5000미만" (or "5000")
         try:
             lower = float(parts[0])
         except:
@@ -224,8 +225,6 @@ def build_user_prompt(e_row, candidate_df):
                 """
     return final_prompt
 
-client = OpenAI(api_key=openai_api_key)
-
 def gpt_based_match(e_row, candidate_df):
     """
     최신 openai 패키지(v1.0.0 이상) 기준 GPT 매칭 수행
@@ -243,9 +242,8 @@ def gpt_based_match(e_row, candidate_df):
     """
 
     try:
-        # 최신 방식의 API 호출
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",  # 또는 gpt-4o
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",  # 모델 이름 재확인 필요
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
@@ -253,7 +251,6 @@ def gpt_based_match(e_row, candidate_df):
             temperature=0.0,
             max_tokens=600
         )
-        # 최신 버전 응답 처리 방식
         result_str = response.choices[0].message.content.strip()
         result = json.loads(result_str)
         best = result.get("best_match", "no_match")
@@ -270,11 +267,10 @@ def gpt_based_match(e_row, candidate_df):
 # ------------------------------------------------
 # 4) 최종 매칭 함수 (점수 칼럼 저장 추가)
 # ------------------------------------------------
-def match_buildings(ebd_df, bd_df, openai_api_key):
+def match_buildings(ebd_df, bd_df):
     """
     ebd_df: EBD(에너지 보고) 데이터
-    bd_df: BD(건축물대장) 데이터 (MAIN_USE 없음)
-    openai_api_key: GPT 호출용 API키
+    bd_df: BD(건축물대장) 데이터 (MAIN_USE 없음, ETC_PURPS만 있음)
 
     반환: ebd_df에 [MATCHED_PK, MATCH_STAGE, RULE_DETAILS, GPT_REASON,
                     USAGE_SCORE, TEXT_SCORE, AREA_SCORE] 열 추가
@@ -344,7 +340,7 @@ def main():
     bd_df = pd.read_csv("./data/BD_REGIST_no_remove3000.csv", encoding='cp949')
 
     # 매칭
-    result_df = match_buildings(ebd_df, bd_df, openai_api_key)
+    result_df = match_buildings(ebd_df, bd_df)
 
     # 결과 저장
     result_df.to_csv("./result/matching_result.csv", index=False)
