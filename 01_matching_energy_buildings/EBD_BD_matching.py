@@ -263,7 +263,7 @@ def gpt_based_match(e_row, candidate_df):
         )
 
         parsed = completion.choices[0].message.parsed
-        print("✅ GPT Parsed Response:", parsed.json(indent=2))
+        print("✅ GPT Parsed Response:", parsed.model_dump_json(indent=2))
         
         if parsed.best_match == "no_match":
             return None, parsed.reason
