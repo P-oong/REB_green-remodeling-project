@@ -187,81 +187,60 @@ def rule_based_match_multi(e_row, candidate_df):
 # ------------------------------------------------
 def build_user_prompt(e_row, candidate_df):
     """
-    EBD 건물 + BD 후보 목록 → 최종 GPT user prompt
+    간소화된 프롬프트: EBD 건물과 해당 RECAP_PK를 가진 BD 후보들을 간략히 정리
     """
-    combined_ebd = (str(e_row.get('OFFICE_NM', '')) + " " + str(e_row.get('BLD_NM', ''))).strip()
-    energy_info = f"""
-            [Energy Report Building]
-            - SEQ_NO: {e_row.get('SEQ_NO')}
-            - RECAP_PK: {e_row.get('RECAP_PK')}
-            - Combined Name: {combined_ebd}
-            - Usage (PUR_NM): {e_row.get('PUR_NM', '')}
-            - Floor Area Category (AREA): {e_row.get('AREA', '')}
-            """
-
-    cand_text = "[Candidate Building Registry]\n"
+    combined_ebd = f"{e_row.get('OFFICE_NM', '')} {e_row.get('BLD_NM', '')}".strip()
+    energy_info = (
+        f"Energy Report Building:\n"
+        f"SEQ_NO: {e_row.get('SEQ_NO')}\n"
+        f"RECAP_PK: {e_row.get('RECAP_PK')}\n"
+        f"Name: {combined_ebd}\n"
+        f"Usage: {e_row.get('PUR_NM', '')}\n"
+        f"Area: {e_row.get('AREA', '')}\n"
+    )
+    cand_text = "Candidate Buildings:\n"
     for i, c_row in candidate_df.iterrows():
-        cmb_bd = (str(c_row.get('BLD_NM', '')) + " " + str(c_row.get('DONG_NM', ''))).strip()
-        usage_bd = str(c_row.get('ETC_PURPS',''))  # MAIN_USE 제거
-        cand_text += f"""
-                    {i+1}. [MGM_BLD_PK: {c_row['MGM_BLD_PK']}]
-                    Combined Name: {cmb_bd}
-                    Usage: {usage_bd}
-                    TOTAREA: {c_row.get('TOTAREA', '')}
-                    """
-
-    final_prompt = f"""
-                You are a real estate and building registry expert in South Korea.
-
-                Determine which of the following candidate building registries best matches the given energy report building. 
-                If there is no confident match, respond with "no_match".
-
-                You MUST select only from the candidate building registries that share the same RECAP_PK. Do not guess beyond this group.
-
-                Format your response as JSON:
-                {{
-                "best_match": "MGM_BLD_PK or no_match",
-                "reason": "Why matched or no match. 매칭 사유(reason)를 **한국어**로 작성해주세요."
-                }}
-
-                Note: All candidate buildings share the same RECAP_PK as the energy report building ({e_row.get('RECAP_PK')}). Therefore, match only within this group.
-
-                {energy_info}
-
-                {cand_text}
-                """
-    return final_prompt
+        cmb_bd = f"{c_row.get('BLD_NM', '')} {c_row.get('DONG_NM', '')}".strip()
+        usage_bd = c_row.get('ETC_PURPS', '')
+        cand_text += (
+            f"{i+1}. [MGM_BLD_PK: {c_row['MGM_BLD_PK']}]\n"
+            f"Name: {cmb_bd}\n"
+            f"Usage: {usage_bd}\n"
+            f"TOTAREA: {c_row.get('TOTAREA', '')}\n"
+        )
+    prompt = (
+        "You are an expert in Korean real estate. "
+        "Match the energy report building to the best candidate with the same RECAP_PK. "
+        "If no confident match, respond with 'no_match'. "
+        "Provide your explanation in Korean. "
+        "Return your answer in JSON format: {\"best_match\": \"MGM_BLD_PK or no_match\", \"reason\": \"...\"}\n\n"
+        + energy_info + "\n" + cand_text
+    )
+    return prompt
 
 def gpt_based_match(e_row, candidate_df):
     """
-    최신 openai 패키지(v1.0.0 이상) 기준 GPT 매칭 수행
-    Structured Outputs를 활용하여 응답을 파싱함.
+    GPT 매칭 수행: 간소화된 프롬프트 사용, o3-mini에 맞춰 temperature 없이 호출
     """
     if candidate_df.empty:
         return None, "No candidate"
 
     user_content = build_user_prompt(e_row, candidate_df)
 
-    system_prompt = """
-        You are an expert in Korean real estate and building registry.
-        Your task is to match the 'energy report building' to the correct 'individual building registry (표제부)'.
-        You MUST select only from the candidate building registries that share the same RECAP_PK.
-        Do not guess beyond this group. If unsure, respond with "no_match".
-        
-        Please provide your explanation (reason) in Korean.
-    """
+    system_prompt = (
+        "You are an expert in Korean real estate. "
+        "Match the energy report building to the correct candidate (same RECAP_PK) and explain in Korean."
+    )
 
     try:
-        # Structured Outputs를 사용하여 GPT 응답 파싱 (beta 엔드포인트 사용)
         completion = openai.beta.chat.completions.parse(
-            model="gpt-4o-mini",  # 모델 이름 재확인 필요 (Structured Outputs 지원 모델)
+            model="o3-mini",  # o3-mini 모델 사용
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
             ],
-            temperature=0.0,
-            max_tokens=600,
-            response_format=GptMatchResponse  # Pydantic 모델을 스키마로 지정
+            max_completion_tokens=50,
+            response_format=GptMatchResponse  # Pydantic 모델 사용
         )
 
         parsed = completion.choices[0].message.parsed
@@ -354,7 +333,7 @@ def main():
     result_df = match_buildings(ebd_df, bd_df)
 
     # 결과 저장
-    result_df.to_csv("./result/matching_result_4o_mini.csv", index=False, quoting=1)
+    result_df.to_csv("./result/matching_result_o3-mini.csv", index=False, quoting=1)
     print("Done. See matching_result_o3.csv")
 
 if __name__ == "__main__":
