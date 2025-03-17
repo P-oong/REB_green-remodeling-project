@@ -252,6 +252,7 @@ def gpt_based_match(e_row, candidate_df):
             max_tokens=600
         )
         result_str = response.choices[0].message.content.strip()
+        print("✅ GPT Response:", result_st[:500] result_str else "⚠️ Empty response")
         result = json.loads(result_str)
         best = result.get("best_match", "no_match")
         reason = result.get("reason", "")
