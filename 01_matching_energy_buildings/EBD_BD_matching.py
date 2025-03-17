@@ -177,6 +177,8 @@ def build_user_prompt(e_row, candidate_df):
 
                 Determine which of the following candidate building registries best matches the given energy report building. 
                 If there is no confident match, respond with "no_match".
+                
+                You MUST select only from the candidate building registries that share the same RECAP_PK. Do not guess beyond this group.
 
                 Format your response as JSON:
                 {{
@@ -203,8 +205,9 @@ def gpt_based_match(e_row, candidate_df, openai_api_key):
 
     system_prompt = """
             You are an expert in Korean real estate and building registry.
-            You must match the 'energy report building' to the correct 'individual building registry (표제부)'.
-            If not sure, respond with "no_match".
+            Your task is to match the 'energy report building' to the correct 'individual building registry (표제부)'.
+            You MUST select only from the candidate building registries that share the same RECAP_PK.
+            Do not guess beyond this group. If unsure, respond with "no_match".
             """
     try:
         response = openai.ChatCompletion.create(
@@ -234,11 +237,11 @@ def match_buildings(ebd_df, bd_df, openai_api_key):
     """
     ebd_df: EBD(에너지 보고) 데이터
     bd_df: BD(건축물대장) 데이터
-    openai_api_key: GPT 호출용 API키
+    openai.api_key: GPT 호출용 API키
 
     반환: ebd_df에 [MATCHED_PK, MATCH_STAGE, RULE_DETAILS, GPT_REASON] 열 추가
     """
-    # 결과 컬럼 init
+    # 결과 컬럼 초기화
     ebd_df['MATCHED_PK'] = None
     ebd_df['MATCH_STAGE'] = 0
     ebd_df['RULE_DETAILS'] = ""
@@ -247,48 +250,57 @@ def match_buildings(ebd_df, bd_df, openai_api_key):
     for idx, row in ebd_df.iterrows():
         recap = row['RECAP_PK']
         multi_yn = row['MULTI_YN']
+
+        # (예외처리) RECAP_PK 또는 MULTI_YN 가 NA면 스킵
+        if pd.isna(recap) or pd.isna(multi_yn):
+            ebd_df.at[idx, 'MATCHED_PK'] = None
+            ebd_df.at[idx, 'MATCH_STAGE'] = 0
+            ebd_df.at[idx, 'GPT_REASON'] = "RECAP_PK or MULTI_YN is NA, skipped."
+            continue  # 다음 row로 넘어감
+
         # BD 후보 필터링
         subset = bd_df[bd_df['RECAP_PK'] == recap]
 
         # (1) MULTI_YN='N'인 경우 후보가 1건이면 바로 매칭
         if multi_yn == 'N':
             if len(subset) == 1:
-                ebd_df.at[idx,'MATCHED_PK'] = subset.iloc[0]['MGM_BLD_PK']
-                ebd_df.at[idx,'MATCH_STAGE'] = 1
-                continue
+                ebd_df.at[idx, 'MATCHED_PK'] = subset.iloc[0]['MGM_BLD_PK']
+                ebd_df.at[idx, 'MATCH_STAGE'] = 1
+                continue  # 다음 row로 넘어감
 
-        # (2) MULTI_YN='Y' or candidate > 1 : 규칙 기반
+        # (2) MULTI_YN='Y' 또는 후보가 여러 개인 경우: 규칙 기반
         mgmt_pk_1st, detail_str = rule_based_match_multi(row, subset)
         if mgmt_pk_1st is not None:
             # 1차 매칭 성공
-            ebd_df.at[idx,'MATCHED_PK'] = mgmt_pk_1st
-            ebd_df.at[idx,'MATCH_STAGE'] = 1
-            ebd_df.at[idx,'RULE_DETAILS'] = detail_str
+            ebd_df.at[idx, 'MATCHED_PK'] = mgmt_pk_1st
+            ebd_df.at[idx, 'MATCH_STAGE'] = 1
+            ebd_df.at[idx, 'RULE_DETAILS'] = detail_str
         else:
             # 1차 매칭 실패 → 2차 GPT
             best_gpt, reason_gpt = gpt_based_match(row, subset, openai_api_key)
             if best_gpt is not None:
-                ebd_df.at[idx,'MATCHED_PK'] = best_gpt
-                ebd_df.at[idx,'MATCH_STAGE'] = 2
-                ebd_df.at[idx,'GPT_REASON'] = reason_gpt
+                ebd_df.at[idx, 'MATCHED_PK'] = best_gpt
+                ebd_df.at[idx, 'MATCH_STAGE'] = 2
+                ebd_df.at[idx, 'GPT_REASON'] = reason_gpt
             else:
-                ebd_df.at[idx,'MATCHED_PK'] = None
-                ebd_df.at[idx,'MATCH_STAGE'] = 0
-                ebd_df.at[idx,'GPT_REASON'] = reason_gpt
+                ebd_df.at[idx, 'MATCHED_PK'] = None
+                ebd_df.at[idx, 'MATCH_STAGE'] = 0
+                ebd_df.at[idx, 'GPT_REASON'] = reason_gpt
 
     return ebd_df
+
 
 # ---------------------------
 # 예시 사용
 # ---------------------------
 def main():
     # 1) EBD 데이터 (15개 샘플) 읽기
-    ebd_df = pd.read_csv("./data/EBD_TABLE.csv")
+    ebd_df = pd.read_csv("./data/EBD_TABLE.csv", encoding='cp949')
     ebd_df = ebd_df.head(15)  
     # 예) 컬럼: SEQ_NO, RECAP_PK, MULTI_YN, OFFICE_NM, BLD_NM, DONG_NM, PUR_NM, AREA 등
     
     # 2) BD 데이터 (전체) 읽기
-    bd_df = pd.read_csv("./data/BD_REGIST_no_remove3000.csv")
+    bd_df = pd.read_csv("./data/BD_REGIST_no_remove3000.csv", encoding='cp949')
     # 예) 컬럼: MGM_BLD_PK, RECAP_PK, BLD_NM, DONG_NM, ETC_PURPS(또는 MAIN_USE), TOTAREA 등
 
     # 3) 매칭 수행 (1차 규칙 기반 → 2차 GPT)
