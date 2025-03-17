@@ -1,8 +1,9 @@
 import os
 import json
 import pandas as pd
-import openai
 from dotenv import load_dotenv
+import openai
+from pydantic import BaseModel
 
 # 1) 환경 변수 로드 & OpenAI 키 체크
 load_dotenv()
@@ -10,6 +11,13 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
     raise ValueError("OPENAI_API_KEY environment variable not set.")
 openai.api_key = openai_api_key
+
+# ------------------------------------------------
+# Pydantic 모델 정의: GPT 응답 스키마
+# ------------------------------------------------
+class GptMatchResponse(BaseModel):
+    best_match: str
+    reason: str
 
 # ------------------------------------------------
 # 1) 면적 텍스트 전처리 함수
@@ -46,7 +54,7 @@ def parse_area_text(area_str):
 
     # B) "이상"만 있는 경우: "10000이상"
     elif "이상" in s:
-        val_str = s.replace("이상","").strip()
+        val_str = s.replace("이상", "").strip()
         try:
             lower = float(val_str)
         except:
@@ -129,7 +137,6 @@ def compute_rule_score_details(e_row, c_row):
 
     return total_score, rule_details, details["usage_score"], details["text_score"], details["area_score"]
 
-
 def rule_based_match_multi(e_row, candidate_df):
     """
     MULTI_YN='Y' 인 건물의 1차 규칙 기반 매칭
@@ -176,7 +183,7 @@ def rule_based_match_multi(e_row, candidate_df):
         return None, "1st rule-based match failed", 0, 0, 0
 
 # ------------------------------------------------
-# 3) 2차 작업: GPT API
+# 3) 2차 작업: GPT API (Structured Outputs 활용)
 # ------------------------------------------------
 def build_user_prompt(e_row, candidate_df):
     """
@@ -228,6 +235,7 @@ def build_user_prompt(e_row, candidate_df):
 def gpt_based_match(e_row, candidate_df):
     """
     최신 openai 패키지(v1.0.0 이상) 기준 GPT 매칭 수행
+    Structured Outputs를 활용하여 응답을 파싱함.
     """
     if candidate_df.empty:
         return None, "No candidate"
@@ -242,26 +250,25 @@ def gpt_based_match(e_row, candidate_df):
     """
 
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",  # 모델 이름 재확인 필요
+        # Structured Outputs를 사용하여 GPT 응답 파싱 (beta 엔드포인트 사용)
+        completion = openai.beta.chat.completions.parse(
+            model="gpt-4o-mini-2024-08-06",  # 모델 이름 재확인 필요 (Structured Outputs 지원 모델)
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
             ],
             temperature=0.0,
-            max_tokens=600
+            max_tokens=600,
+            response_format=GptMatchResponse  # Pydantic 모델을 스키마로 지정
         )
-        result_str = response.choices[0].message.content.strip()
-        print("✅ GPT Response:", result_str[:500] if result_str else "⚠️ Empty response")
+
+        parsed = completion.choices[0].message.parsed
+        print("✅ GPT Parsed Response:", parsed.json(indent=2))
         
-        result = json.loads(result_str)
-        best = result.get("best_match", "no_match")
-        reason = result.get("reason", "")
-        
-        if best == "no_match":
-            return None, reason
+        if parsed.best_match == "no_match":
+            return None, parsed.reason
         else:
-            return best, reason
+            return parsed.best_match, parsed.reason
 
     except Exception as e:
         return None, f"GPT Error: {e}"
