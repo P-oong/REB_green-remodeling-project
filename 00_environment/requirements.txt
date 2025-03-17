@@ -1,3 +1,4 @@
+annotated-types==0.7.0
 anyio @ file:///C:/b/abs_31grv7a7bl/croot/anyio_1729121290992/work
 argon2-cffi @ file:///opt/conda/conda-bld/argon2-cffi_1645000214183/work
 argon2-cffi-bindings @ file:///C:/b/abs_f11axiliot/croot/argon2-cffi-bindings_1736182463870/work
@@ -20,6 +21,7 @@ cycler @ file:///tmp/build/80754af9/cycler_1637851556182/work
 debugpy @ file:///C:/b/abs_bf9oo2vhxp/croot/debugpy_1736269476451/work
 decorator @ file:///opt/conda/conda-bld/decorator_1643638310831/work
 defusedxml @ file:///tmp/build/80754af9/defusedxml_1615228127516/work
+distro==1.9.0
 exceptiongroup @ file:///C:/b/abs_c5h1o1_b5b/croot/exceptiongroup_1706031441653/work
 executing @ file:///opt/conda/conda-bld/executing_1646925071911/work
 fastjsonschema @ file:///C:/b/abs_4ev90296ly/croot/python-fastjsonschema_1731939386416/work
@@ -35,6 +37,7 @@ ipython @ file:///C:/b/abs_e5729i179y/croot/ipython_1694181400005/work
 ipywidgets @ file:///C:/b/abs_f03en2fv37/croot/ipywidgets_1733504604628/work
 jedi @ file:///C:/b/abs_3a2kbnlclc/croot/jedi_1733987412687/work
 Jinja2 @ file:///C:/b/abs_920kup4e6u/croot/jinja2_1741711580669/work
+jiter==0.9.0
 json5 @ file:///C:/b/abs_743lprxrv5/croot/json5_1730786818336/work
 jsonschema @ file:///C:/b/abs_394_t6__xq/croot/jsonschema_1728486718320/work
 jsonschema-specifications @ file:///C:/b/abs_0brvm6vryw/croot/jsonschema-specifications_1699032417323/work
@@ -66,6 +69,7 @@ notebook @ file:///C:/b/abs_b552cuftgu/croot/notebook_1738159967315/work
 notebook_shim @ file:///C:/b/abs_a5xysln3lb/croot/notebook-shim_1699455926920/work
 numexpr @ file:///C:/b/abs_05o8p7bfml/croot/numexpr_1730215959182/work
 numpy @ file:///C:/b/abs_0123vcxhf8/croot/numpy_and_numpy_base_1725470331966/work/dist/numpy-2.0.1-cp39-cp39-win_amd64.whl#sha256=afd4c53d4b548db7b600782fd4368ad419de0533ac199a031101a0b99df7eaf7
+openai==1.66.3
 overrides @ file:///C:/b/abs_cfh89c8yf4/croot/overrides_1699371165349/work
 packaging @ file:///C:/b/abs_3by6s2fa66/croot/packaging_1734472138782/work
 pandas @ file:///C:/b/abs_e18w9ay4we/croot/pandas_1732735115740/work/dist/pandas-2.2.3-cp39-cp39-win_amd64.whl#sha256=f3b41dc9b2687250cbbb5587843986d13008da63bfb026b34d05d4d2f3eab666
@@ -79,12 +83,15 @@ prompt-toolkit @ file:///C:/b/abs_68uwr58ed1/croot/prompt-toolkit_1704404394082/
 psutil @ file:///C:/b/abs_b5gv3mn55h/croot/psutil_1736371546320/work
 pure-eval @ file:///opt/conda/conda-bld/pure_eval_1646925070566/work
 pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pydantic==2.10.6
+pydantic_core==2.27.2
 Pygments @ file:///C:/b/abs_fay9dpq4n_/croot/pygments_1684279990574/work
 pyparsing @ file:///C:/b/abs_40z8gyj9wi/croot/pyparsing_1731445739241/work
 PyQt6==6.7.1
 PyQt6_sip @ file:///C:/b/abs_28s7k4h_hl/croot/pyqt-split_1740498234166/work/pyqt_sip
 PySocks @ file:///C:/ci/pysocks_1605307512533/work
 python-dateutil @ file:///C:/b/abs_3au_koqnbs/croot/python-dateutil_1716495777160/work
+python-dotenv==1.0.1
 python-json-logger @ file:///C:/b/abs_0cm_mnox0z/croot/python-json-logger_1734370042436/work
 pytz @ file:///C:/b/abs_6ap4tsz1ox/croot/pytz_1713974360290/work
 pywin32==308
@@ -108,6 +115,7 @@ terminado @ file:///C:/b/abs_25nakickad/croot/terminado_1671751845491/work
 tinycss2 @ file:///C:/b/abs_df38owi5ma/croot/tinycss2_1738337725183/work
 tomli @ file:///C:/Windows/TEMP/abs_ac109f85-a7b3-4b4d-bcfd-52622eceddf0hy332ojo/croots/recipe/tomli_1657175513137/work
 tornado @ file:///C:/b/abs_7cyu943ybx/croot/tornado_1733960510898/work
+tqdm==4.67.1
 traitlets @ file:///C:/b/abs_bfsnoxl4pq/croot/traitlets_1718227069245/work
 typing_extensions @ file:///C:/b/abs_0ffjxtihug/croot/typing_extensions_1734714875646/work
 tzdata @ file:///croot/python-tzdata_1690578112552/work
