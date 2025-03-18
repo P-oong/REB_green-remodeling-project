@@ -329,17 +329,13 @@ def match_buildings(ebd_df, bd_df):
                 ebd_df.at[idx, 'MATCHED_PK'] = best_gpt
                 ebd_df.at[idx, 'MATCH_STAGE'] = 3
                 ebd_df.at[idx, 'GPT_REASON'] = reason_gpt
-                ebd_df.at[idx, 'USAGE_SCORE'] = 0
-                ebd_df.at[idx, 'TEXT_SCORE'] = 0
-                ebd_df.at[idx, 'AREA_SCORE'] = 0
+
             else:
                 # 최종 실패
                 ebd_df.at[idx, 'MATCHED_PK'] = None
                 ebd_df.at[idx, 'MATCH_STAGE'] = 99
                 ebd_df.at[idx, 'GPT_REASON'] = reason_gpt
-                ebd_df.at[idx, 'USAGE_SCORE'] = 0
-                ebd_df.at[idx, 'TEXT_SCORE'] = 0
-                ebd_df.at[idx, 'AREA_SCORE'] = 0
+
 
     return ebd_df
 
