@@ -139,7 +139,7 @@ def compute_rule_score_details(e_row, c_row):
 
 def rule_based_match_multi(e_row, candidate_df):
     """
-    MULTI_YN='Y' 인 건물의 1차 규칙 기반 매칭
+    2차 규칙 기반 매칭
     - 최고 점수가 2점 이상이고 유일하면 매칭
     반환값: (mgmt_pk or None, rule_details, usage_s, text_s, area_s)
     """
@@ -294,23 +294,30 @@ def match_buildings(ebd_df, bd_df):
     # 이미 매칭된 BD PK를 추적할 세트
     matched_pks = set()
     
-    # 1단계: 단일 후보가 있는 EBD 먼저 처리
+    # 각 RECAP_PK에 대한 EBD 개수 계산
+    recap_ebd_counts = ebd_df['RECAP_PK'].value_counts().to_dict()
+    
+    # 1단계: EBD와 BD 모두 1건일 때만 매칭
     for idx, row in ebd_df.iterrows():
         recap = row['RECAP_PK']
-        multi_yn = row['MULTI_YN']
         
-        if pd.isna(recap) or pd.isna(multi_yn):
-            ebd_df.at[idx, 'GPT_REASON'] = "RECAP_PK or MULTI_YN is NA, skipped."
+        if pd.isna(recap):
+            ebd_df.at[idx, 'RULE_DETAILS'] = "RECAP_PK is NA, skipped."
             continue
             
+        # 해당 RECAP_PK의 EBD가 1건인지 확인
+        ebd_count = recap_ebd_counts.get(recap, 0)
+        
+        # 해당 RECAP_PK의 BD 후보 찾기
         subset = bd_df[bd_df['RECAP_PK'] == recap]
         
-        # MULTI_YN='N' & 후보가 1건이면 바로 매칭
-        if multi_yn == 'N' and len(subset) == 1:
+        # EBD 1건, BD 1건일 때만 매칭
+        if ebd_count == 1 and len(subset) == 1:
             mgm_bld_pk = subset.iloc[0]['MGM_BLD_PK']
             if mgm_bld_pk not in matched_pks:  # 아직 매칭되지 않은 경우만
                 ebd_df.at[idx, 'MATCHED_PK'] = mgm_bld_pk
                 ebd_df.at[idx, 'MATCH_STAGE'] = 1
+                ebd_df.at[idx, 'RULE_DETAILS'] = "Both EBD and BD are single candidates"
                 matched_pks.add(mgm_bld_pk)
     
     # 2단계: 매칭되지 않은 EBD에 대해 규칙 기반 점수 계산
