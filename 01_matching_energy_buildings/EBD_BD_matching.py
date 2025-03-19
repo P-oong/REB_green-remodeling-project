@@ -280,11 +280,7 @@ def gpt_based_match(e_row, candidate_df):
 # ------------------------------------------------
 def match_buildings(ebd_df, bd_df):
     """
-    ebd_df: EBD(에너지 보고) 데이터
-    bd_df: BD(건축물대장) 데이터 (MAIN_USE 없음, ETC_PURPS만 있음)
-
-    반환: ebd_df에 [MATCHED_PK, MATCH_STAGE, RULE_DETAILS, GPT_REASON,
-                    USAGE_SCORE, TEXT_SCORE, AREA_SCORE] 열 추가
+    중복 매칭을 방지하며 EBD와 BD를 매칭
     """
     # 결과 컬럼 초기화
     ebd_df['MATCHED_PK'] = None
@@ -294,48 +290,112 @@ def match_buildings(ebd_df, bd_df):
     ebd_df['USAGE_SCORE'] = 0
     ebd_df['TEXT_SCORE'] = 0
     ebd_df['AREA_SCORE'] = 0
-
+    
+    # 이미 매칭된 BD PK를 추적할 세트
+    matched_pks = set()
+    
+    # 1단계: 단일 후보가 있는 EBD 먼저 처리
     for idx, row in ebd_df.iterrows():
         recap = row['RECAP_PK']
         multi_yn = row['MULTI_YN']
-
-        # RECAP_PK 또는 MULTI_YN NA → 스킵
+        
         if pd.isna(recap) or pd.isna(multi_yn):
             ebd_df.at[idx, 'GPT_REASON'] = "RECAP_PK or MULTI_YN is NA, skipped."
             continue
-
-        # BD 후보
+            
         subset = bd_df[bd_df['RECAP_PK'] == recap]
-
-        # (1) MULTI_YN='N' & 후보가 1건이면 바로 매칭
+        
+        # MULTI_YN='N' & 후보가 1건이면 바로 매칭
         if multi_yn == 'N' and len(subset) == 1:
-            ebd_df.at[idx, 'MATCHED_PK'] = subset.iloc[0]['MGM_BLD_PK']
-            ebd_df.at[idx, 'MATCH_STAGE'] = 1
+            mgm_bld_pk = subset.iloc[0]['MGM_BLD_PK']
+            if mgm_bld_pk not in matched_pks:  # 아직 매칭되지 않은 경우만
+                ebd_df.at[idx, 'MATCHED_PK'] = mgm_bld_pk
+                ebd_df.at[idx, 'MATCH_STAGE'] = 1
+                matched_pks.add(mgm_bld_pk)
+    
+    # 2단계: 매칭되지 않은 EBD에 대해 규칙 기반 점수 계산
+    for idx, row in ebd_df.iterrows():
+        if ebd_df.at[idx, 'MATCH_STAGE'] > 0:
             continue
-
-        # (2) 1차 규칙
-        mgmt_pk_1st, detail_str, usage_s, text_s, area_s = rule_based_match_multi(row, subset)
-        if mgmt_pk_1st is not None:
-            ebd_df.at[idx, 'MATCHED_PK'] = mgmt_pk_1st
-            ebd_df.at[idx, 'MATCH_STAGE'] = 2
-            ebd_df.at[idx, 'RULE_DETAILS'] = detail_str
-            ebd_df.at[idx, 'USAGE_SCORE'] = usage_s
-            ebd_df.at[idx, 'TEXT_SCORE'] = text_s
-            ebd_df.at[idx, 'AREA_SCORE'] = area_s
-        else:
-            # 1차 실패 → GPT
+            
+        recap = row['RECAP_PK']
+        if pd.isna(recap):
+            continue
+            
+        subset = bd_df[bd_df['RECAP_PK'] == recap]
+        # 이미 매칭된 BD 제외
+        subset = subset[~subset['MGM_BLD_PK'].isin(matched_pks)]
+        
+        if not subset.empty:
+            # 각 후보에 대한 점수 계산
+            scores = []
+            detail_list = []
+            usage_list = []
+            text_list = []
+            area_list = []
+            
+            for _, c_row in subset.iterrows():
+                total_s, rule_str, usage_s, text_s, area_s = compute_rule_score_details(row, c_row)
+                scores.append(total_s)
+                detail_list.append(rule_str)
+                usage_list.append(usage_s)
+                text_list.append(text_s)
+                area_list.append(area_s)
+            
+            # 점수 정보를 DataFrame에 추가
+            subset_copy = subset.copy()
+            subset_copy['total_score'] = scores
+            subset_copy['rule_details'] = detail_list
+            subset_copy['usage_score'] = usage_list
+            subset_copy['text_score'] = text_list
+            subset_copy['area_score'] = area_list
+            
+            # 최대 점수와 최대 점수를 가진 후보들 찾기
+            max_score = subset_copy['total_score'].max()
+            best_candidates = subset_copy[subset_copy['total_score'] == max_score]
+            
+            # 최대 점수가 2점 이상이고, 최대 점수를 가진 후보가 유일할 때만 매칭
+            if max_score >= 2 and len(best_candidates) == 1:
+                best = best_candidates.iloc[0]
+                bd_pk = best['MGM_BLD_PK']
+                
+                if bd_pk not in matched_pks:
+                    ebd_df.at[idx, 'MATCHED_PK'] = bd_pk
+                    ebd_df.at[idx, 'MATCH_STAGE'] = 2
+                    ebd_df.at[idx, 'RULE_DETAILS'] = best['rule_details']
+                    ebd_df.at[idx, 'USAGE_SCORE'] = best['usage_score']
+                    ebd_df.at[idx, 'TEXT_SCORE'] = best['text_score']
+                    ebd_df.at[idx, 'AREA_SCORE'] = best['area_score']
+                    matched_pks.add(bd_pk)
+    
+    # 4단계: 남은 매칭되지 않은 EBD에 대해 GPT 기반 매칭
+    for idx, row in ebd_df.iterrows():
+        if ebd_df.at[idx, 'MATCH_STAGE'] > 0:  # 이미 매칭된 경우 스킵
+            continue
+            
+        recap = row['RECAP_PK']
+        if pd.isna(recap):
+            continue
+            
+        subset = bd_df[bd_df['RECAP_PK'] == recap]
+        # 이미 매칭된 BD 제외
+        subset = subset[~subset['MGM_BLD_PK'].isin(matched_pks)]
+        
+        if not subset.empty:
             best_gpt, reason_gpt = gpt_based_match(row, subset)
-            if best_gpt is not None:
+            if best_gpt is not None and best_gpt not in matched_pks:
                 ebd_df.at[idx, 'MATCHED_PK'] = best_gpt
                 ebd_df.at[idx, 'MATCH_STAGE'] = 3
                 ebd_df.at[idx, 'GPT_REASON'] = reason_gpt
-
+                matched_pks.add(best_gpt)
             else:
-                # 최종 실패
-                ebd_df.at[idx, 'MATCHED_PK'] = None
+                # GPT 매칭 실패
                 ebd_df.at[idx, 'MATCH_STAGE'] = 99
-                ebd_df.at[idx, 'GPT_REASON'] = reason_gpt
-
+                ebd_df.at[idx, 'GPT_REASON'] = reason_gpt if reason_gpt else "남은 BD 후보 없음"
+        else:
+            # 매칭할 BD 후보가 없음
+            ebd_df.at[idx, 'MATCH_STAGE'] = 99
+            ebd_df.at[idx, 'GPT_REASON'] = "남은 BD 후보 없음 (모두 매칭됨)"
 
     return ebd_df
 
@@ -351,7 +411,7 @@ def main():
 
     # 결과 저장
     result_df.to_csv("./result/matching_result_4o_mini.csv", index=False, quoting=1)
-    print("Done. See matching_result_o3.csv")
+    print("Done. See matching_result.csv")
 
 if __name__ == "__main__":
     main()
