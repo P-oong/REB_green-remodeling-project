@@ -1,13 +1,35 @@
-# 공통 무시
+# Python
 __pycache__/
 *.py[cod]
 *.so
+
+# Jupyter Notebook 체크포인트
 .ipynb_checkpoints/
+
+# 환경 파일
 .env
+
+# Conda / virtualenv
+.env/
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+
+# IDE
 .vscode/
 .idea/
+
+# OS 파일
 .DS_Store
+Thumbs.db
+
+
 
 # 데이터/결과 무시 (각 작업 폴더 공통)
 */data/
 */result/
+
+
+
