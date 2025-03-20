@@ -1,7 +1,6 @@
 import os
 import json
 import pandas as pd
-import numpy as np
 from dotenv import load_dotenv
 import openai
 from pydantic import BaseModel
@@ -19,51 +18,6 @@ openai.api_key = openai_api_key
 class GptMatchResponse(BaseModel):
     best_match: str
     reason: str
-
-# ------------------------------------------------
-# 1) 면적 텍스트 전처리 함수
-# ------------------------------------------------
-def parse_area_text(area_str):
-    """
-    EBD의 AREA 컬럼(예: "3,000㎡이상~5,000㎡미만", "5,000㎡이상~10,000㎡미만", "10,000㎡이상")을
-    (lower_bound, upper_bound) 형태로 파싱.
-    upper_bound == None 이면 상한이 없는 것(이상만).
-    """
-    if not isinstance(area_str, str):
-        return (None, None)
-
-    s = area_str.replace(",", "").replace("㎡", "").strip()
-    # 예: "3000이상~5000미만", "5000이상~10000미만", "10000이상"
-    lower, upper = None, None
-
-    # A) "이상~" 있는 형태: "3000이상~5000미만"
-    if "이상~" in s:
-        parts = s.split("이상~")
-        try:
-            lower = float(parts[0])
-        except:
-            lower = None
-
-        if "미만" in parts[1]:
-            up_str = parts[1].replace("미만", "").strip()
-            try:
-                upper = float(up_str)
-            except:
-                upper = None
-        else:
-            upper = None
-
-    # B) "이상"만 있는 경우: "10000이상"
-    elif "이상" in s:
-        val_str = s.replace("이상", "").strip()
-        try:
-            lower = float(val_str)
-        except:
-            lower = None
-        upper = None
-
-    # C) (필요하다면 "미만"만 있는 케이스 추가)
-    return (lower, upper)
 
 # ------------------------------------------------
 # 2) 1차 규칙 기반 매칭용 점수 계산
@@ -91,17 +45,17 @@ def compute_rule_score_details(e_row, c_row):
     }
 
     # (2) 용도 점수
-    pur_nm = str(e_row.get('PUR_NM','')).lower()
+    pur_nm = str(e_row.get('용도','')).lower()
     etc_purps = str(c_row.get('ETC_PURPS','')).lower()  # MAIN_USE는 없는 상황
     if pur_nm and pur_nm in etc_purps:
         details["usage_score"] = 1
-        reasons["usage"] = "PUR_NM in ETC_PURPS"
+        reasons["usage"] = "용도 in ETC_PURPS"
     else:
         details["usage_score"] = 0
-        reasons["usage"] = "PUR_NM mismatch"
+        reasons["usage"] = "용도 mismatch"
 
     # (3) 텍스트 결합 점수
-    combined_ebd = (str(e_row.get('OFFICE_NM','')) + " " + str(e_row.get('BLD_NM',''))).strip().lower()
+    combined_ebd = (str(e_row.get('기관명','')) + " " + str(e_row.get('건축물명',''))).strip().lower()
     combined_bd = (str(c_row.get('BLD_NM','')) + " " + str(c_row.get('DONG_NM',''))).strip().lower()
 
     if combined_ebd and combined_bd and (combined_ebd in combined_bd):
@@ -111,22 +65,25 @@ def compute_rule_score_details(e_row, c_row):
         details["text_score"] = 0
         reasons["text"] = "text mismatch"
 
-    # (4) 면적 점수
-    area_str = e_row.get('AREA','')
-    totarea = float(c_row.get('TOTAREA',0))
-    lower, upper = parse_area_text(area_str)
-    if (lower is None) and (upper is None):
-        details["area_score"] = 0
-        reasons["area"] = "Area range parse failed"
-    else:
-        ok_lower = (lower is None) or (totarea >= lower)
-        ok_upper = (upper is None) or (totarea < upper)
-        if ok_lower and ok_upper:
+    # (4) 면적 점수 - 연면적 ±5% 범위 검사
+    try:
+        ebd_area = e_row.get('연면적', 0)  # 이미 float 형태로 제공됨
+        bd_area = c_row.get('TOTAREA', 0)
+        
+        # 연면적의 ±5% 범위 계산
+        lower_bound = ebd_area * 0.95  # 5% 작은 값
+        upper_bound = ebd_area * 1.05  # 5% 큰 값
+        
+        if lower_bound <= bd_area <= upper_bound:
             details["area_score"] = 1
-            reasons["area"] = f"{totarea} in [{lower if lower else 0}, {upper if upper else '∞'})"
+            reasons["area"] = f"{bd_area}는 {ebd_area}의 ±5% 범위({lower_bound:.2f}~{upper_bound:.2f}) 내에 있음"
         else:
             details["area_score"] = 0
-            reasons["area"] = f"{totarea} not in range"
+            percent_diff = ((bd_area - ebd_area) / ebd_area) * 100
+            reasons["area"] = f"{bd_area}는 {ebd_area}의 ±5% 범위 밖에 있음 (차이: {percent_diff:.2f}%)"
+    except (ValueError, TypeError):
+        details["area_score"] = 0
+        reasons["area"] = "면적 데이터 처리 오류"
 
     # (5) 총점 및 상세 문자열
     total_score = sum(details.values())
@@ -190,14 +147,14 @@ def build_user_prompt(e_row, candidate_df):
     """
     EBD 건물 + BD 후보 목록 → 최종 GPT user prompt
     """
-    combined_ebd = (str(e_row.get('OFFICE_NM', '')) + " " + str(e_row.get('BLD_NM', ''))).strip()
+    combined_ebd = (str(e_row.get('기관명', '')) + " " + str(e_row.get('건축물명', ''))).strip()
     energy_info = f"""
             [Energy Report Building]
             - SEQ_NO: {e_row.get('SEQ_NO')}
             - RECAP_PK: {e_row.get('RECAP_PK')}
             - Combined Name: {combined_ebd}
-            - Usage (PUR_NM): {e_row.get('PUR_NM', '')}
-            - Floor Area Category (AREA): {e_row.get('AREA', '')}
+            - Usage (용도): {e_row.get('용도', '')}
+            - Floor Area (연면적): {e_row.get('연면적', '')}
             """
 
     cand_text = "[Candidate Building Registry]\n"
@@ -283,18 +240,6 @@ def match_buildings(ebd_df, bd_df):
     """
     중복 매칭을 방지하며 EBD와 BD를 매칭
     """
-    # 컬럼명 매핑 - 새 EBD 데이터의 컬럼명을 기존 코드에서 사용하던 이름으로 변경
-    ebd_df = ebd_df.rename(columns={
-        '기관명': 'OFFICE_NM',
-        '건축물 명': 'BLD_NM',
-        '용도': 'PUR_NM',
-        '면적': 'AREA'
-    })
-    
-    # MULTI_YN 컬럼 생성 (같은 RECAP_PK를 가진 EBD 개수에 따라 'Y' 또는 'N' 설정)
-    recap_counts = ebd_df['RECAP_PK'].value_counts()
-    ebd_df['MULTI_YN'] = ebd_df['RECAP_PK'].apply(lambda x: 'Y' if recap_counts[x] > 1 else 'N')
-    
     # 결과 컬럼 초기화
     ebd_df['MATCHED_PK'] = None
     ebd_df['MATCH_STAGE'] = 0
