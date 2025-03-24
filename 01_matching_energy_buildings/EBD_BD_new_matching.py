@@ -102,7 +102,14 @@ def rule_based_match_multi(e_row, candidate_df):
     반환값: (mgmt_pk or None, rule_details, usage_s, text_s, area_s)
     """
     if candidate_df.empty:
-        return None, "No candidate", 0, 0, 0
+        # 딕셔너리 형태로 반환하여 일관성 유지
+        return {
+            "matched_pk": None,
+            "rule_details": "No candidate",
+            "usage_score": 0,
+            "text_score": 0,
+            "area_score": 0
+        }
 
     scores = []
     detail_list = []
@@ -130,15 +137,23 @@ def rule_based_match_multi(e_row, candidate_df):
 
     if max_score >= 2 and len(best) == 1:
         br = best.iloc[0]
-        return (
-            br['MGM_BLD_PK'], 
-            br['rule_details'],
-            br['usage_score'],
-            br['text_score'],
-            br['area_score']
-        )
+        # 딕셔너리 형태로 반환하여 일관성 유지
+        return {
+            "matched_pk": br['MGM_BLD_PK'],
+            "rule_details": br['rule_details'],
+            "usage_score": br['usage_score'],
+            "text_score": br['text_score'],
+            "area_score": br['area_score']
+        }
     else:
-        return None, "1st rule-based match failed", 0, 0, 0
+        # 딕셔너리 형태로 반환하여 일관성 유지
+        return {
+            "matched_pk": None,
+            "rule_details": "1st rule-based match failed",
+            "usage_score": 0,
+            "text_score": 0,
+            "area_score": 0
+        }
 
 # ------------------------------------------------
 # 3) 2차 작업: GPT API (Structured Outputs 활용)
@@ -196,7 +211,10 @@ def gpt_based_match(e_row, candidate_df):
     Structured Outputs를 활용하여 응답을 파싱함.
     """
     if candidate_df.empty:
-        return None, "No candidate"
+        return {
+            "matched_pk": None,
+            "reason": "No candidate"
+        }
 
     user_content = build_user_prompt(e_row, candidate_df)
 
@@ -226,12 +244,21 @@ def gpt_based_match(e_row, candidate_df):
         print("✅ GPT Parsed Response:", parsed.model_dump_json(indent=2))
         
         if parsed.best_match == "no_match":
-            return None, parsed.reason
+            return {
+                "matched_pk": None,
+                "reason": parsed.reason
+            }
         else:
-            return parsed.best_match, parsed.reason
+            return {
+                "matched_pk": parsed.best_match,
+                "reason": parsed.reason
+            }
 
     except Exception as e:
-        return None, f"GPT Error: {e}"
+        return {
+            "matched_pk": None, 
+            "reason": f"GPT Error: {e}"
+        }
 
 # ------------------------------------------------
 # 4) 최종 매칭 함수 (점수 칼럼 저장 추가)
