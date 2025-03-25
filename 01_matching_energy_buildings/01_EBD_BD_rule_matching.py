@@ -45,7 +45,12 @@ def match_candidate(group, bd_counts, ebd_counts):
     # 어느 조건에도 해당하지 않으면 미매칭 처리:
     candidate = group.iloc[0].copy()
     candidate['MATCH_STAGE'] = '미매칭'
-    candidate['MGM_BLD_PK'] = None  # 미매칭인 경우 BD 정보는 붙지 않도록 함
+    # 미매칭인 경우 BD 정보는 붙지 않도록 함
+    candidate['MGM_BLD_PK'] = None
+    candidate['TOTAREA'] = None
+    candidate['USE_DATE'] = None
+    candidate['DONG_NM'] = None
+    candidate['BLD_NM'] = None
     return candidate
 
 def rule_based_matching(ebd_df, bd_df):
@@ -132,10 +137,10 @@ def main():
     
     # 모든 컬럼이 존재하는지 확인
     existing_columns = [col for col in essential_columns if col in matched_results.columns]
-    summary_results = matched_results[existing_columns]
+    summary_results = matched_results[existing_columns] 
     
     # 결과 저장 (필요한 컬럼만 저장)
-    os.makedirs("./result", exist_ok=True)
+    os.makedirs("./result", exist_ok=True) 
     summary_results.to_excel("./result/rule_matching_result_ver3.xlsx", index=False)
     print("\n결과가 './result/rule_matching_result_ver3.xlsx'에 저장되었습니다.")
     
