@@ -80,10 +80,10 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
     1. 데이터 사전 처리로 반복 연산 최소화
     2. 필요한 컬럼만 사용하여 메모리 효율화
     3. 불필요한 조합은 사전에 필터링
-    4. 이미 매칭된 BD는 다른 EBD의 후보에서 제외하여 중복 매칭 방지
+    4. 이미 매칭된 BD는 다른 EBD의 후보에서 제외하여 중복 매칭 방지 + 전역 최적화도입
     """
     start_time = time.time()
-    print("최적화된 점수 기반 매칭을 시작합니다...")
+    print("전역 최적화 점수 기반 매칭을 시작합니다...")
     
     # 결과 저장을 위한 리스트
     match_results = []
@@ -96,34 +96,16 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
     ebd_processed = preprocess_data(unmatched_ebd, ebd_columns)
     bd_processed = preprocess_data(bd_df, bd_columns, is_bd=True)
     
-    # 전체 ebd 레코드 수 확인 (진행률 표시용)
+    # 전체 ebd 레코드 수 확인
     total_ebd_records = len(ebd_processed)
     print(f"처리할 미매칭 EBD 레코드: {total_ebd_records}개")
     
-    # RECAP별 EBD 그룹화 - 중복 매칭 방지를 위한 정렬 기준 설정
-    ebd_groups = {}
-    for idx, row in ebd_processed.iterrows():
-        recap = row['RECAP_PK']
-        if pd.isna(recap):
-            continue
-        if recap not in ebd_groups:
-            ebd_groups[recap] = []
-        ebd_groups[recap].append(idx)
-    
-    # RECAP별 BD 데이터 미리 필터링하여 딕셔너리로 저장 (중복 필터링 방지)
-    recap_to_bd = {}
+    # RECAP별 처리
     valid_recaps = set(ebd_processed['RECAP_PK'].dropna().unique())
-    
-    for recap in valid_recaps:
-        recap_to_bd[recap] = bd_processed[bd_processed['RECAP_PK'] == recap]
     
     # 결과 저장 통계
     processed_count = 0
     matched_count = 0
-    duplicate_prevented_count = 0  # 중복 매칭 방지된 건수
-    
-    # 이미 매칭된 BD 건물을 추적하기 위한 집합
-    matched_bd_pks = set()
     
     # 면적 점수 분포 통계
     area_score_stats = {
@@ -134,45 +116,31 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
         "0.0": 0   # 범위 외
     }
     
-    # RECAP별로 처리하여 동일 RECAP 내에서 한 번 매칭된 BD는 다시 매칭되지 않도록 함
+    # RECAP별로 처리 - 전역 최적화 적용
     for recap in tqdm(valid_recaps, desc="RECAP 처리"):
         # 해당 RECAP의 EBD와 BD
-        if recap not in ebd_groups or not ebd_groups[recap]:
+        ebd_recap = ebd_processed[ebd_processed['RECAP_PK'] == recap]
+        bd_recap = bd_processed[bd_processed['RECAP_PK'] == recap]
+        
+        if ebd_recap.empty or bd_recap.empty:
             continue
         
-        ebd_indices = ebd_groups[recap]
-        bd_candidates_orig = recap_to_bd[recap]
+        # 모든 가능한 EBD-BD 조합과 점수를 저장하는 리스트
+        all_combinations = []
         
-        # 해당 RECAP에 대해 이미 매칭된 BD PKs (지역 변수)
-        recap_matched_bd_pks = set()
+        # 각 EBD에 대한 동점 BD 후보 추적을 위한 딕셔너리
+        ebd_score_counts = {}  # {ebd_idx: {score: count}}
         
-        # 각 EBD에 대해 처리
-        for idx in ebd_indices:
-            ebd_row = ebd_processed.loc[idx]
-            original_ebd_row = unmatched_ebd.loc[idx].to_dict()
+        # 각 EBD에 대해 모든 BD와의 점수 계산
+        for ebd_idx, ebd_row in ebd_recap.iterrows():
+            original_ebd_row = unmatched_ebd.loc[ebd_idx].to_dict()
             
-            # BD 후보들 - 이미 매칭된 BD는 제외
-            bd_candidates = bd_candidates_orig.copy()
-            if not bd_candidates.empty:
-                # 이미 매칭된 BD 제외
-                bd_candidates = bd_candidates[~bd_candidates['MGM_BLD_PK'].isin(recap_matched_bd_pks)]
+            # 이 EBD의 점수 카운트 초기화
+            if ebd_idx not in ebd_score_counts:
+                ebd_score_counts[ebd_idx] = {}
             
-            # BD 후보가 없는 경우
-            if bd_candidates.empty:
-                original_ebd_row['MATCH_STAGE'] = '미매칭(중복BD제외)'
-                match_results.append(original_ebd_row)
-                processed_count += 1
-                duplicate_prevented_count += 1
-                continue
-            
-            # 점수 계산 및 매칭
-            best_score = 0.0
-            best_match = None
-            score_counts = {}
-            
-            # 각 BD 후보에 대해 점수 계산
-            for bd_idx, bd_row in bd_candidates.iterrows():
-                # 1. 면적 점수 - 세분화된 함수 사용
+            for bd_idx, bd_row in bd_recap.iterrows():
+                # 1. 면적 점수
                 area_score = calculate_area_score(ebd_row['연면적'], bd_row['TOTAREA'])
                 
                 # 면적 점수 통계 기록
@@ -214,86 +182,127 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
                 # 총점 계산
                 total_score = area_score + date_score + text_score
                 
-                # 최고 점수 갱신
-                if total_score > best_score:
-                    best_score = total_score
-                    best_match = {
-                        'bd_row': bd_df.loc[bd_idx].to_dict(),  # 원본 BD 데이터 사용
+                # 점수 카운트 추적
+                if total_score >= 1.8:
+                    ebd_score_counts[ebd_idx][total_score] = ebd_score_counts[ebd_idx].get(total_score, 0) + 1
+                
+                # 매칭 최소 점수 이상인 경우만 저장
+                if total_score >= 1.8:
+                    all_combinations.append({
+                        'ebd_idx': ebd_idx,
+                        'bd_idx': bd_idx,
                         'area_score': area_score,
                         'date_score': date_score,
                         'text_score': text_score,
                         'total_score': total_score,
-                        'bd_pk': bd_row['MGM_BLD_PK']  # MGM_BLD_PK 추가
-                    }
-                
-                # 점수 카운트 (중복 여부 확인용)
-                score_counts[total_score] = score_counts.get(total_score, 0) + 1
+                        'original_ebd_row': original_ebd_row,
+                        'original_bd_row': bd_df.loc[bd_idx].to_dict(),
+                        'bd_pk': bd_row['MGM_BLD_PK'],
+                        'has_tie': False  # 동점 여부 초기값
+                    })
+        
+        # 각 조합에 동점 여부 표시
+        for combo in all_combinations:
+            ebd_idx = combo['ebd_idx']
+            score = combo['total_score']
+            if ebd_score_counts[ebd_idx][score] > 1:
+                combo['has_tie'] = True
+        
+        # 점수 기준으로 내림차순 정렬
+        all_combinations.sort(key=lambda x: x['total_score'], reverse=True)
+        
+        # 이미 매칭된 EBD와 BD를 추적하기 위한 집합
+        matched_ebd_indices = set()
+        matched_bd_indices = set()
+        
+        # 점수가 높은 순서대로 매칭
+        for combo in all_combinations:
+            ebd_idx = combo['ebd_idx']
+            bd_pk = combo['bd_pk']
             
-            # 매칭 여부 결정 - 매칭 기준 조정 (소수점 점수 반영)
-            if best_score >= 1.8 and score_counts[best_score] == 1:  # 총점 1.8 이상 (세분화된 점수 고려)
-                # 매칭 결과 생성
-                result = original_ebd_row.copy()
-                
-                # BD 정보 추가
-                for key, value in best_match['bd_row'].items():
-                    if key not in result:  # 중복 컬럼 처리
-                        result[key] = value
-                
-                # 점수 정보 추가
-                result['AREA_SCORE'] = best_match['area_score']
-                result['DATE_SCORE'] = best_match['date_score']
-                result['TEXT_SCORE'] = best_match['text_score']
-                result['TOTAL_SCORE'] = best_match['total_score']
-                result['MATCH_STAGE'] = '4차'
-                
-                # 매칭된 BD 추적
-                bd_pk = best_match['bd_pk']
-                recap_matched_bd_pks.add(bd_pk)
-                matched_bd_pks.add(bd_pk)
-                
-                matched_count += 1
+            # 이미 매칭된 EBD나 BD는 제외
+            if ebd_idx in matched_ebd_indices or bd_pk in matched_bd_indices:
+                continue
+            
+            # 매칭 결과 생성
+            result = combo['original_ebd_row'].copy()
+            
+            # BD 정보 추가
+            for key, value in combo['original_bd_row'].items():
+                if key not in result:
+                    result[key] = value
+            
+            # 점수 정보 추가
+            result['AREA_SCORE'] = combo['area_score']
+            result['DATE_SCORE'] = combo['date_score']
+            result['TEXT_SCORE'] = combo['text_score']
+            result['TOTAL_SCORE'] = combo['total_score']
+            
+            # 동점 여부에 따라 매칭 스테이지 설정
+            if combo['has_tie']:
+                result['MATCH_STAGE'] = '4차(동점후보존재)'
             else:
-                # 매칭되지 않은 경우
-                result = original_ebd_row.copy()
-                
-                if best_score < 1.8:
-                    result['MATCH_STAGE'] = '미매칭(점수미달)'
-                else:
-                    result['MATCH_STAGE'] = '미매칭(중복후보)'
-                
-                # 점수 정보 추가 (분석용)
-                if best_match:
-                    result['AREA_SCORE'] = best_match['area_score']
-                    result['DATE_SCORE'] = best_match['date_score']
-                    result['TEXT_SCORE'] = best_match['text_score']
-                    result['TOTAL_SCORE'] = best_match['total_score']
+                result['MATCH_STAGE'] = '4차'
+            
+            # 매칭된 항목 추적
+            matched_ebd_indices.add(ebd_idx)
+            matched_bd_indices.add(bd_pk)
             
             match_results.append(result)
-            processed_count += 1
+            matched_count += 1
         
-        # 진행 상황 업데이트 (10개 단위)
-        if len(match_results) % 100 == 0:
-            elapsed_time = time.time() - start_time
-            print(f"처리 진행: {processed_count}/{total_ebd_records} 레코드 완료 ({matched_count} 매칭됨) - 경과 시간: {elapsed_time:.2f}초")
+        # 매칭되지 않은 EBD 처리
+        for ebd_idx, ebd_row in ebd_recap.iterrows():
+            if ebd_idx not in matched_ebd_indices:
+                original_ebd_row = unmatched_ebd.loc[ebd_idx].to_dict()
+                
+                # 해당 EBD의 최고 점수 찾기
+                best_score = 0.0
+                best_combo = None
+                has_tie = False
+                
+                for combo in all_combinations:
+                    if combo['ebd_idx'] == ebd_idx:
+                        if combo['total_score'] > best_score:
+                            best_score = combo['total_score']
+                            best_combo = combo
+                            has_tie = combo['has_tie']
+                
+                # 매칭되지 않은 이유에 따라 상태 설정
+                if best_score >= 1.8:
+                    if has_tie:
+                        original_ebd_row['MATCH_STAGE'] = '미매칭(동점후보)'
+                    else:
+                        original_ebd_row['MATCH_STAGE'] = '미매칭(더높은점수존재)'
+                    # 점수 정보 추가
+                    original_ebd_row['AREA_SCORE'] = best_combo['area_score']
+                    original_ebd_row['DATE_SCORE'] = best_combo['date_score']
+                    original_ebd_row['TEXT_SCORE'] = best_combo['text_score']
+                    original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
+                elif best_score > 0:
+                    original_ebd_row['MATCH_STAGE'] = '미매칭(점수미달)'
+                    # 점수 정보 추가
+                    original_ebd_row['AREA_SCORE'] = best_combo['area_score']
+                    original_ebd_row['DATE_SCORE'] = best_combo['date_score']
+                    original_ebd_row['TEXT_SCORE'] = best_combo['text_score']
+                    original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
+                else:
+                    original_ebd_row['MATCH_STAGE'] = '미매칭(후보없음)'
+                
+                match_results.append(original_ebd_row)
+                processed_count += 1
     
     # 면적 점수 통계 출력
     print("\n면적 점수 분포:")
-    print(f"- ±1% 범위 (1.0점): {area_score_stats['1.0']}건")
-    print(f"- ±5% 범위 (0.8점): {area_score_stats['0.8']}건")
-    print(f"- ±10% 범위 (0.5점): {area_score_stats['0.5']}건")
-    print(f"- ±20% 범위 (0.2점): {area_score_stats['0.2']}건")
-    print(f"- 범위 외 (0.0점): {area_score_stats['0.0']}건")
-    
-    # 중복 매칭 방지 통계 출력
-    print(f"\n중복 매칭 방지: {duplicate_prevented_count}건의 EBD가 이미 매칭된 BD로 인해 매칭에서 제외됨")
-    print(f"매칭된 고유 BD 건수: {len(matched_bd_pks)}건")
+    for score, count in area_score_stats.items():
+        print(f"- {score}점: {count}건")
     
     # 리스트를 데이터프레임으로 변환
     result_df = pd.DataFrame(match_results)
     
     # 실행 시간 출력
     elapsed_time = time.time() - start_time
-    print(f"매칭 완료: 총 {processed_count}개 중 {matched_count}개가 매칭됨 - 총 소요 시간: {elapsed_time:.2f}초")
+    print(f"매칭 완료: 총 {processed_count + matched_count}개 중 {matched_count}개가 매칭됨 - 총 소요 시간: {elapsed_time:.2f}초")
     
     return result_df
 
