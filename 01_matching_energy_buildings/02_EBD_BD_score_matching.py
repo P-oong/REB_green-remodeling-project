@@ -22,7 +22,7 @@ def extract_unmatched_ebd(rule_result_df):
     unmatched_df = rule_result_df[rule_result_df['MATCH_STAGE'] == '미매칭'].copy()
     
     # 필요한 컬럼만 선택 (한글 변수명 + 기본 식별 정보)
-    ebd_columns = ['SEQ_NO', 'RECAP_PK', '연면적', '사용승인연도', '기관명', '건축물명', '주소', '지상', '지하', 'MATCH_STAGE']
+    ebd_columns = ['SEQ_NO', 'RECAP_PK', '연면적', '사용승인연도', '기관명', '건축물명', '주소', '지상', '지하', 'MGM_BLD_PK', 'MATCH_STAGE', 'EBD_COUNT', 'BD_COUNT', 'EBD_OVER_BD']
     ebd_columns = [col for col in ebd_columns if col in unmatched_df.columns]
     unmatched_ebd = unmatched_df[ebd_columns]
     
@@ -30,7 +30,7 @@ def extract_unmatched_ebd(rule_result_df):
 
 def calculate_area_score(ebd_area, bd_area):
     """
-    연면적 점수 계산: ±5% 범위 내에 있으면 1점, 아니면 0점
+    연면적 점수 계산: ±5% 범위 내에 있으면 1점, 아니면 0점 
     """
     if pd.isna(ebd_area) or pd.isna(bd_area):
         return 0
@@ -220,6 +220,9 @@ def main():
     # 데이터 로드
     rule_result_df, bd_df = load_data()
     
+    # 원본 순서 보존을 위한 컬럼 추가
+    rule_result_df['_원본순서'] = range(len(rule_result_df))
+    
     # 미매칭 EBD 추출
     unmatched_ebd = extract_unmatched_ebd(rule_result_df)
     print(f"미매칭 EBD 건수: {len(unmatched_ebd)}")
@@ -237,16 +240,29 @@ def main():
     matched_from_rules = rule_result_df[rule_result_df['MATCH_STAGE'] != '미매칭'].copy()
     
     # 기존 매칭 결과와 새로운 점수 기반 매칭 결과 합치기
-    final_result = pd.concat([matched_from_rules, score_result_df], ignore_index=True)
+    final_result = pd.concat([matched_from_rules, score_result_df], ignore_index=False)
+    
+    # 원본 순서대로 정렬
+    final_result = final_result.sort_values('_원본순서')
+    
+        # 통계 출력
+    final_counts = final_result['MATCH_STAGE'].value_counts()
+    print("\n4차 점수 기반 매칭 결과:")
+    for stage, count in final_counts.items():
+        print(f"- {stage}: {count}건")
+    
+    # 임시 순서 컬럼 제거
+    if '_원본순서' in final_result.columns:
+        final_result = final_result.drop('_원본순서', axis=1)
     
     # 결과 저장
     os.makedirs("./result", exist_ok=True)
-    final_result.to_excel("./result/combined_matching_result.xlsx", index=False)
-    print("\n최종 결과가 './result/combined_matching_result.xlsx'에 저장되었습니다.")
+    final_result.to_excel("./result/score_matching_result_ver1.xlsx", index=False)
+    print("\n최종 결과가 './result/score_matching_result_ver1.xlsx'에 저장되었습니다.")
     
     # 점수 기반 매칭 결과만 따로 저장
-    score_result_df.to_excel("./result/score_based_matching_result.xlsx", index=False)
-    print("4차 점수 기반 매칭 결과가 './result/score_based_matching_result.xlsx'에 저장되었습니다.")
+    score_result_df.to_excel("./result/score_only_matching_result_ver1.xlsx", index=False)
+    print("4차 점수 기반 매칭 결과가 './result/score_only_matching_result_ver1.xlsx'에 저장되었습니다.")
     
     return final_result
 
