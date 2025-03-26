@@ -41,7 +41,7 @@ def preprocess_data(df, columns, is_bd=False):
     
     return result[columns]
 
-def calculate_area_score(ebd_area, bd_area):
+def calculate_area_score(ebd_area, bd_area): 
     """
     연면적 점수 계산: 다양한 범위에 따라 차등적 점수 부여
     - ±1% 범위: 1.0점 (매우 높은 정밀도)
@@ -81,6 +81,7 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
     2. 필요한 컬럼만 사용하여 메모리 효율화
     3. 불필요한 조합은 사전에 필터링
     4. 이미 매칭된 BD는 다른 EBD의 후보에서 제외하여 중복 매칭 방지 + 전역 최적화도입
+    5. SEQ_NO를 유니크 키로 활용하여 인덱스 문제 방지
     """
     start_time = time.time()
     print("전역 최적화 점수 기반 매칭을 시작합니다...")
@@ -89,8 +90,12 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
     match_results = []
     
     # 데이터 사전 처리
-    ebd_columns = ['SEQ_NO', 'RECAP_PK', '연면적', '사용승인연도', '기관명', '건축물명', '주소']
+    ebd_columns = ['SEQ_NO', 'RECAP_PK', '연면적', '사용승인연도', '기관명', '건축물명', '주소', 
+                   'EBD_COUNT', 'BD_COUNT', 'EBD_OVER_BD']
     bd_columns = ['MGM_BLD_PK', 'RECAP_PK', 'TOTAREA', 'USE_DATE', 'BLD_NM', 'DONG_NM']
+    
+    # SEQ_NO를 인덱스로 사용할 수 있도록 원본 데이터 저장
+    unmatched_ebd_by_seq = {row['SEQ_NO']: row.to_dict() for _, row in unmatched_ebd.iterrows()}
     
     # 사용할 컬럼만 선택하고 전처리
     ebd_processed = preprocess_data(unmatched_ebd, ebd_columns)
@@ -129,15 +134,16 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
         all_combinations = []
         
         # 각 EBD에 대한 동점 BD 후보 추적을 위한 딕셔너리
-        ebd_score_counts = {}  # {ebd_idx: {score: count}}
+        ebd_score_counts = {}  # {seq_no: {score: count}}
         
         # 각 EBD에 대해 모든 BD와의 점수 계산
-        for ebd_idx, ebd_row in ebd_recap.iterrows():
-            original_ebd_row = unmatched_ebd.loc[ebd_idx].to_dict()
+        for _, ebd_row in ebd_recap.iterrows():
+            seq_no = ebd_row['SEQ_NO']
+            original_ebd_row = unmatched_ebd_by_seq[seq_no]
             
             # 이 EBD의 점수 카운트 초기화
-            if ebd_idx not in ebd_score_counts:
-                ebd_score_counts[ebd_idx] = {}
+            if seq_no not in ebd_score_counts:
+                ebd_score_counts[seq_no] = {}
             
             for bd_idx, bd_row in bd_recap.iterrows():
                 # 1. 면적 점수
@@ -184,12 +190,12 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
                 
                 # 점수 카운트 추적
                 if total_score >= 1.8:
-                    ebd_score_counts[ebd_idx][total_score] = ebd_score_counts[ebd_idx].get(total_score, 0) + 1
+                    ebd_score_counts[seq_no][total_score] = ebd_score_counts[seq_no].get(total_score, 0) + 1
                 
                 # 매칭 최소 점수 이상인 경우만 저장
                 if total_score >= 1.8:
                     all_combinations.append({
-                        'ebd_idx': ebd_idx,
+                        'seq_no': seq_no,
                         'bd_idx': bd_idx,
                         'area_score': area_score,
                         'date_score': date_score,
@@ -203,25 +209,25 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
         
         # 각 조합에 동점 여부 표시
         for combo in all_combinations:
-            ebd_idx = combo['ebd_idx']
+            seq_no = combo['seq_no']
             score = combo['total_score']
-            if ebd_score_counts[ebd_idx][score] > 1:
+            if ebd_score_counts[seq_no][score] > 1:
                 combo['has_tie'] = True
         
         # 점수 기준으로 내림차순 정렬
         all_combinations.sort(key=lambda x: x['total_score'], reverse=True)
         
         # 이미 매칭된 EBD와 BD를 추적하기 위한 집합
-        matched_ebd_indices = set()
+        matched_seq_nos = set()
         matched_bd_indices = set()
         
         # 점수가 높은 순서대로 매칭
         for combo in all_combinations:
-            ebd_idx = combo['ebd_idx']
+            seq_no = combo['seq_no']
             bd_pk = combo['bd_pk']
             
             # 이미 매칭된 EBD나 BD는 제외
-            if ebd_idx in matched_ebd_indices or bd_pk in matched_bd_indices:
+            if seq_no in matched_seq_nos or bd_pk in matched_bd_indices:
                 continue
             
             # 매칭 결과 생성
@@ -245,16 +251,17 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
                 result['MATCH_STAGE'] = '4차'
             
             # 매칭된 항목 추적
-            matched_ebd_indices.add(ebd_idx)
+            matched_seq_nos.add(seq_no)
             matched_bd_indices.add(bd_pk)
             
             match_results.append(result)
             matched_count += 1
         
         # 매칭되지 않은 EBD 처리
-        for ebd_idx, ebd_row in ebd_recap.iterrows():
-            if ebd_idx not in matched_ebd_indices:
-                original_ebd_row = unmatched_ebd.loc[ebd_idx].to_dict()
+        for _, ebd_row in ebd_recap.iterrows():
+            seq_no = ebd_row['SEQ_NO']
+            if seq_no not in matched_seq_nos:
+                original_ebd_row = unmatched_ebd_by_seq[seq_no].copy()
                 
                 # 해당 EBD의 최고 점수 찾기
                 best_score = 0.0
@@ -262,11 +269,10 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
                 has_tie = False
                 
                 for combo in all_combinations:
-                    if combo['ebd_idx'] == ebd_idx:
-                        if combo['total_score'] > best_score:
-                            best_score = combo['total_score']
-                            best_combo = combo
-                            has_tie = combo['has_tie']
+                    if combo['seq_no'] == seq_no and combo['total_score'] > best_score:
+                        best_score = combo['total_score']
+                        best_combo = combo
+                        has_tie = combo['has_tie']
                 
                 # 매칭되지 않은 이유에 따라 상태 설정
                 if best_score >= 1.8:
@@ -274,18 +280,20 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
                         original_ebd_row['MATCH_STAGE'] = '미매칭(동점후보)'
                     else:
                         original_ebd_row['MATCH_STAGE'] = '미매칭(더높은점수존재)'
-                    # 점수 정보 추가
-                    original_ebd_row['AREA_SCORE'] = best_combo['area_score']
-                    original_ebd_row['DATE_SCORE'] = best_combo['date_score']
-                    original_ebd_row['TEXT_SCORE'] = best_combo['text_score']
-                    original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
+                    # 점수 정보 추가 (best_combo가 None이 아님을 확인)
+                    if best_combo:
+                        original_ebd_row['AREA_SCORE'] = best_combo['area_score']
+                        original_ebd_row['DATE_SCORE'] = best_combo['date_score']
+                        original_ebd_row['TEXT_SCORE'] = best_combo['text_score']
+                        original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
                 elif best_score > 0:
                     original_ebd_row['MATCH_STAGE'] = '미매칭(점수미달)'
-                    # 점수 정보 추가
-                    original_ebd_row['AREA_SCORE'] = best_combo['area_score']
-                    original_ebd_row['DATE_SCORE'] = best_combo['date_score']
-                    original_ebd_row['TEXT_SCORE'] = best_combo['text_score']
-                    original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
+                    # 점수 정보 추가 (best_combo가 None이 아님을 확인)
+                    if best_combo:
+                        original_ebd_row['AREA_SCORE'] = best_combo['area_score']
+                        original_ebd_row['DATE_SCORE'] = best_combo['date_score']
+                        original_ebd_row['TEXT_SCORE'] = best_combo['text_score']
+                        original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
                 else:
                     original_ebd_row['MATCH_STAGE'] = '미매칭(후보없음)'
                 
@@ -320,6 +328,13 @@ def main():
     # 미매칭 EBD 레코드 직접 추출
     unmatched_ebd = rule_result_df[rule_result_df['MATCH_STAGE'] == '미매칭'].copy()
     print(f"미매칭 EBD 건수: {len(unmatched_ebd)}")
+    
+    # SEQ_NO가 누락된 레코드에 대한 처리
+    if unmatched_ebd['SEQ_NO'].isnull().any():
+        print("경고: SEQ_NO가 누락된 레코드가 있습니다. 임시 SEQ_NO를 할당합니다.")
+        null_seq_mask = unmatched_ebd['SEQ_NO'].isnull()
+        max_seq = unmatched_ebd['SEQ_NO'].max()
+        unmatched_ebd.loc[null_seq_mask, 'SEQ_NO'] = range(max_seq + 1, max_seq + 1 + null_seq_mask.sum())
     
     # 최적화된 점수 기반 매칭 수행
     score_result_df = optimize_score_based_matching(unmatched_ebd, bd_df)
