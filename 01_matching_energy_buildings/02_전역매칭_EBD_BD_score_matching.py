@@ -74,7 +74,7 @@ def calculate_area_score(ebd_area, bd_area):
     except (ValueError, TypeError, ZeroDivisionError):
         return 0.0
 
-def optimize_score_based_matching(unmatched_ebd, bd_df):
+def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
     """
     최적화된 점수 기반 매칭 수행:
     1. 데이터 사전 처리로 반복 연산 최소화
@@ -82,9 +82,11 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
     3. 불필요한 조합은 사전에 필터링
     4. 이미 매칭된 BD는 다른 EBD의 후보에서 제외하여 중복 매칭 방지 + 전역 최적화도입
     5. SEQ_NO를 유니크 키로 활용하여 인덱스 문제 방지
+    6. 이미 1~3차에서 매칭된 BD(MGM_BLD_PK)는 4차 매칭에서 제외
     """
     start_time = time.time()
     print("전역 최적화 점수 기반 매칭을 시작합니다...")
+    print(f"이전 단계(1~3차)에서 매칭된 BD 개수: {len(already_matched_bd_pks)}개")
     
     # 결과 저장을 위한 리스트
     match_results = []
@@ -99,7 +101,12 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
     
     # 사용할 컬럼만 선택하고 전처리
     ebd_processed = preprocess_data(unmatched_ebd, ebd_columns)
-    bd_processed = preprocess_data(bd_df, bd_columns, is_bd=True)
+    
+    # 이미 매칭된 BD 필터링
+    bd_df_filtered = bd_df[~bd_df['MGM_BLD_PK'].isin(already_matched_bd_pks)].copy()
+    print(f"1~3차 매칭 제외 후 사용 가능한 BD 개수: {len(bd_df_filtered)}개")
+    
+    bd_processed = preprocess_data(bd_df_filtered, bd_columns, is_bd=True)
     
     # 전체 ebd 레코드 수 확인
     total_ebd_records = len(ebd_processed)
@@ -202,7 +209,7 @@ def optimize_score_based_matching(unmatched_ebd, bd_df):
                         'text_score': text_score,
                         'total_score': total_score,
                         'original_ebd_row': original_ebd_row,
-                        'original_bd_row': bd_df.loc[bd_idx].to_dict(),
+                        'original_bd_row': bd_df_filtered.loc[bd_idx].to_dict(),
                         'bd_pk': bd_row['MGM_BLD_PK'],
                         'has_tie': False  # 동점 여부 초기값
                     })
@@ -329,6 +336,14 @@ def main():
     unmatched_ebd = rule_result_df[rule_result_df['MATCH_STAGE'] == '미매칭'].copy()
     print(f"미매칭 EBD 건수: {len(unmatched_ebd)}")
     
+    # 1~3차 매칭 결과에서 이미 매칭된 BD의 MGM_BLD_PK 추출
+    matched_from_rules = rule_result_df[rule_result_df['MATCH_STAGE'] != '미매칭'].copy()
+    already_matched_bd_pks = set()
+    
+    if 'MGM_BLD_PK' in matched_from_rules.columns:
+        already_matched_bd_pks = set(matched_from_rules['MGM_BLD_PK'].dropna().unique())
+        print(f"1~3차에서 이미 매칭된 BD(MGM_BLD_PK) 개수: {len(already_matched_bd_pks)}개")
+    
     # SEQ_NO가 누락된 레코드에 대한 처리
     if unmatched_ebd['SEQ_NO'].isnull().any():
         print("경고: SEQ_NO가 누락된 레코드가 있습니다. 임시 SEQ_NO를 할당합니다.")
@@ -336,17 +351,14 @@ def main():
         max_seq = unmatched_ebd['SEQ_NO'].max()
         unmatched_ebd.loc[null_seq_mask, 'SEQ_NO'] = range(max_seq + 1, max_seq + 1 + null_seq_mask.sum())
     
-    # 최적화된 점수 기반 매칭 수행
-    score_result_df = optimize_score_based_matching(unmatched_ebd, bd_df)
+    # 최적화된 점수 기반 매칭 수행 - 이미 매칭된 BD는 제외
+    score_result_df = optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks)
     
     # 통계 출력
     stage_counts = score_result_df['MATCH_STAGE'].value_counts()
     print("\n4차 점수 기반 매칭 결과:")
     for stage, count in stage_counts.items():
         print(f"- {stage}: {count}건")
-    
-    # 기존 매칭 결과에서 미매칭 레코드만 제외
-    matched_from_rules = rule_result_df[rule_result_df['MATCH_STAGE'] != '미매칭'].copy()
     
     # 기존 매칭 결과와 새로운 점수 기반 매칭 결과 합치기
     final_result = pd.concat([matched_from_rules, score_result_df], ignore_index=False)
