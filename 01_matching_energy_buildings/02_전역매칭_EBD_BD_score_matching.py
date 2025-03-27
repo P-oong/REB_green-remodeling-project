@@ -83,6 +83,7 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
     4. 이미 매칭된 BD는 다른 EBD의 후보에서 제외하여 중복 매칭 방지 + 전역 최적화도입
     5. SEQ_NO를 유니크 키로 활용하여 인덱스 문제 방지
     6. 이미 1~3차에서 매칭된 BD(MGM_BLD_PK)는 4차 매칭에서 제외
+    7. RECAP_PK가 없는 레코드는 '미매칭(RECAP없음)'으로 처리
     """
     start_time = time.time()
     print("전역 최적화 점수 기반 매칭을 시작합니다...")
@@ -99,8 +100,23 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
     # SEQ_NO를 인덱스로 사용할 수 있도록 원본 데이터 저장
     unmatched_ebd_by_seq = {row['SEQ_NO']: row.to_dict() for _, row in unmatched_ebd.iterrows()}
     
+    # RECAP_PK가 없는 레코드는 '미매칭(RECAP없음)'으로 처리
+    no_recap_mask = unmatched_ebd['RECAP_PK'].isna()
+    if no_recap_mask.any():
+        no_recap_count = no_recap_mask.sum()
+        print(f"RECAP_PK가 없는 레코드 수: {no_recap_count}개 (이 레코드들은 '미매칭(RECAP없음)'으로 처리됩니다)")
+        
+        for _, row in unmatched_ebd[no_recap_mask].iterrows():
+            seq_no = row['SEQ_NO']
+            original_ebd_row = unmatched_ebd_by_seq[seq_no].copy()
+            original_ebd_row['MATCH_STAGE'] = '미매칭(RECAP없음)'
+            match_results.append(original_ebd_row)
+    
+    # RECAP_PK가 있는 레코드만 처리
+    ebd_with_recap = unmatched_ebd[~no_recap_mask].copy()
+    
     # 사용할 컬럼만 선택하고 전처리
-    ebd_processed = preprocess_data(unmatched_ebd, ebd_columns)
+    ebd_processed = preprocess_data(ebd_with_recap, ebd_columns)
     
     # 이미 매칭된 BD 필터링
     bd_df_filtered = bd_df[~bd_df['MGM_BLD_PK'].isin(already_matched_bd_pks)].copy()
@@ -110,7 +126,7 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
     
     # 전체 ebd 레코드 수 확인
     total_ebd_records = len(ebd_processed)
-    print(f"처리할 미매칭 EBD 레코드: {total_ebd_records}개")
+    print(f"처리할 RECAP이 있는 미매칭 EBD 레코드: {total_ebd_records}개")
     
     # RECAP별 처리
     valid_recaps = set(ebd_processed['RECAP_PK'].dropna().unique())
@@ -284,7 +300,7 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                 # 매칭되지 않은 이유에 따라 상태 설정
                 if best_score >= 1.8:
                     if has_tie:
-                        original_ebd_row['MATCH_STAGE'] = '미매칭(동점후보)'
+                        original_ebd_row['MATCH_STAGE'] = '미매칭(동점후보)' # 동점후보는 사람 검수 필수 (헝가리안 알고리즘 등 최적 매칭은 불가능으로 판단)
                     else:
                         original_ebd_row['MATCH_STAGE'] = '미매칭(더높은점수존재)'
                     # 점수 정보 추가 (best_combo가 None이 아님을 확인)
@@ -315,9 +331,46 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
     # 리스트를 데이터프레임으로 변환
     result_df = pd.DataFrame(match_results)
     
+    # 미매칭 레코드의 점수 분포 출력
+    if 'MATCH_STAGE' in result_df.columns and 'TOTAL_SCORE' in result_df.columns:
+        unmatched_df = result_df[result_df['MATCH_STAGE'].str.startswith('미매칭', na=False)]
+        if not unmatched_df.empty:
+            # 점수 범위별 카운트
+            score_bins = {
+                "0~1점": 0,
+                "1~1.7점": 0,
+                "1.8~2.0점": 0,
+                "2점 이상": 0,
+                "점수 없음": 0
+            }
+            
+            for _, row in unmatched_df.iterrows():
+                if pd.isna(row.get('TOTAL_SCORE')):
+                    score_bins["점수 없음"] += 1
+                else:
+                    score = float(row['TOTAL_SCORE'])
+                    if score < 1.0:
+                        score_bins["0~1점"] += 1
+                    elif score < 1.8:
+                        score_bins["1~1.7점"] += 1
+                    elif score <= 2.0:
+                        score_bins["1.8~2.0점"] += 1
+                    else:
+                        score_bins["2점 이상"] += 1
+            
+            print("\n미매칭 레코드의 총점 분포:")
+            for range_label, count in score_bins.items():
+                print(f"- {range_label}: {count}건")
+            
+            # 세부적인 미매칭 상태별 분포
+            unmatch_stage_counts = unmatched_df['MATCH_STAGE'].value_counts()
+            print("\n미매칭 유형별 분포:")
+            for stage, count in unmatch_stage_counts.items():
+                print(f"- {stage}: {count}건")
+    
     # 실행 시간 출력
     elapsed_time = time.time() - start_time
-    print(f"매칭 완료: 총 {processed_count + matched_count}개 중 {matched_count}개가 매칭됨 - 총 소요 시간: {elapsed_time:.2f}초")
+    print(f"매칭 완료: 총 {len(result_df)}개 중 {matched_count}개가 매칭됨 - 총 소요 시간: {elapsed_time:.2f}초")
     
     return result_df
 
@@ -359,6 +412,27 @@ def main():
     print("\n4차 점수 기반 매칭 결과:")
     for stage, count in stage_counts.items():
         print(f"- {stage}: {count}건")
+    
+    # 미매칭 레코드의 총점 분석
+    if 'MATCH_STAGE' in score_result_df.columns and 'TOTAL_SCORE' in score_result_df.columns:
+        unmatched_df = score_result_df[score_result_df['MATCH_STAGE'].str.startswith('미매칭', na=False)]
+        if not unmatched_df.empty:
+            # 미매칭 유형별 총점 분포
+            print("\n미매칭 유형별 총점 분포:")
+            for stage in unmatched_df['MATCH_STAGE'].unique():
+                stage_df = unmatched_df[unmatched_df['MATCH_STAGE'] == stage]
+                
+                # '미매칭(RECAP없음)', '미매칭(후보없음)' 등의 경우 점수가 없을 수 있음
+                if 'TOTAL_SCORE' in stage_df.columns:
+                    stage_df = stage_df.dropna(subset=['TOTAL_SCORE'])
+                    if not stage_df.empty:
+                        mean_score = stage_df['TOTAL_SCORE'].mean()
+                        max_score = stage_df['TOTAL_SCORE'].max()
+                        print(f"- {stage}: 평균 {mean_score:.2f}점, 최대 {max_score:.2f}점, {len(stage_df)}건")
+                    else:
+                        print(f"- {stage}: 점수 정보 없음, {len(unmatched_df[unmatched_df['MATCH_STAGE'] == stage])}건")
+                else:
+                    print(f"- {stage}: 점수 정보 없음, {len(stage_df)}건")
     
     # 기존 매칭 결과와 새로운 점수 기반 매칭 결과 합치기
     final_result = pd.concat([matched_from_rules, score_result_df], ignore_index=False)
