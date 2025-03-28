@@ -3,6 +3,28 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm  # 진행률 표시를 위해 추가
 import time  # 실행 시간 측정을 위해 추가
+import re  # 정규 표현식 처리를 위해 추가
+
+def preprocess_text(text):
+    """
+    텍스트 전처리: 소문자 변환, 특수문자를 공백으로 치환, 토큰화
+    """
+    if pd.isna(text) or text is None:
+        return []
+    
+    # 문자열로 변환
+    text = str(text).lower()
+    
+    # 특수문자를 공백으로 치환
+    text = re.sub(r'[^\w\s]', ' ', text)
+    
+    # 공백으로 분할하여 토큰화
+    tokens = text.split()
+    
+    # 빈 문자열이나 공백만 있는 토큰 제거
+    tokens = [token.strip() for token in tokens if token.strip()]
+    
+    return tokens
 
 def load_data():
     """
@@ -18,7 +40,7 @@ def load_data():
 
 def preprocess_data(df, columns, is_bd=False):
     """
-    데이터 전처리: 숫자 컬럼 변환, 문자열 컬럼 소문자화
+    데이터 전처리: 숫자 컬럼 변환, 문자열 컬럼 토큰화
     """
     result = df.copy()
     
@@ -33,13 +55,46 @@ def preprocess_data(df, columns, is_bd=False):
             except:
                 pass
     
-    # 문자열 컬럼 처리
-    text_columns = ['BLD_NM', 'DONG_NM'] if is_bd else ['기관명', '건축물명', '주소']
-    for col in text_columns:
-        if col in result.columns:
-            result[col] = result[col].astype(str).str.lower()
+    # 문자열 컬럼 처리 및 토큰화
+    token_columns = []
     
-    return result[columns]
+    if is_bd:
+        # BD 데이터의 텍스트 컬럼
+        text_columns = ['BLD_NM', 'DONG_NM']
+        for col in text_columns:
+            if col in result.columns:
+                # 문자열 소문자화
+                result[col] = result[col].astype(str).str.lower()
+                # 토큰화된 컬럼 생성
+                result[f'{col}_tokens'] = result[col].apply(preprocess_text)
+                token_columns.append(f'{col}_tokens')
+    else:
+        # EBD 데이터의 텍스트 컬럼
+        text_columns = ['기관명', '건축물명', '주소']
+        for col in text_columns:
+            if col in result.columns:
+                # 문자열 소문자화
+                result[col] = result[col].astype(str).str.lower()
+                # 토큰화된 컬럼 생성
+                result[f'{col}_tokens'] = result[col].apply(preprocess_text)
+                token_columns.append(f'{col}_tokens')
+        
+        # 통합 토큰 생성 (중복 제거)
+        result['ebd_unified_tokens'] = result.apply(
+            lambda row: list(set(
+                (row.get('기관명_tokens', []) or []) + 
+                (row.get('건축물명_tokens', []) or []) + 
+                (row.get('주소_tokens', []) or [])
+            )),
+            axis=1
+        )
+        token_columns.append('ebd_unified_tokens')
+    
+    # 원래 컬럼과 토큰 컬럼 합쳐서 반환
+    return_columns = columns.copy()
+    return_columns.extend(token_columns)
+    
+    return result[return_columns]
 
 def calculate_area_score(ebd_area, bd_area): 
     """
@@ -144,6 +199,13 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
         "0.0": 0   # 범위 외
     }
     
+    # 텍스트 점수 분포 통계
+    text_score_stats = {
+        "BLD_NM (0.8)": 0,  # BLD_NM 토큰 일치
+        "DONG_NM (1.0)": 0,  # DONG_NM 토큰 일치
+        "모두 불일치 (0.0)": 0  # 둘 다 일치하지 않음
+    }
+    
     # RECAP별로 처리 - 전역 최적화 적용
     for recap in tqdm(valid_recaps, desc="RECAP 처리"):
         # 해당 RECAP의 EBD와 BD
@@ -188,28 +250,33 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     except:
                         pass
                 
-                # 3. 텍스트 점수
-                text_score = 0.0
-                # 3.1 기관명이 BLD_NM에 포함
-                if str(ebd_row['기관명']) != 'nan' and str(ebd_row['기관명']) in str(bd_row['BLD_NM']):
-                    text_score += 1.0
+                # 3. 텍스트 점수 - 토큰 기반 새로운 로직
+                bld_score = 0.0
+                dong_score = 0.0
                 
-                # 3.2 건축물명이 BLD_NM 또는 DONG_NM에 포함
-                if str(ebd_row['건축물명']) != 'nan' and (
-                    str(ebd_row['건축물명']) in str(bd_row['BLD_NM']) or 
-                    str(ebd_row['건축물명']) in str(bd_row['DONG_NM'])
-                ):
-                    text_score += 1.0
+                # EBD 통합 토큰과 BD의 BLD_NM 토큰 비교
+                ebd_tokens = ebd_row['ebd_unified_tokens']
+                bld_nm_tokens = bd_row['BLD_NM_tokens']
                 
-                # 3.3 결합 텍스트 비교
-                ebd_combined = (str(ebd_row['기관명']) + " " + str(ebd_row['건축물명'])).strip()
-                bd_combined = (str(bd_row['BLD_NM']) + " " + str(bd_row['DONG_NM'])).strip()
+                # 공통 토큰이 있는지 확인
+                if any(token in bld_nm_tokens for token in ebd_tokens):
+                    bld_score = 0.8
+                    text_score_stats["BLD_NM (0.8)"] += 1
                 
-                if ebd_combined != " " and ebd_combined in bd_combined:
-                    text_score += 1.0
+                # EBD 통합 토큰과 BD의 DONG_NM 토큰 비교
+                dong_nm_tokens = bd_row['DONG_NM_tokens']
                 
-                # 총점 계산
-                total_score = area_score + date_score + text_score
+                # 공통 토큰이 있는지 확인
+                if any(token in dong_nm_tokens for token in ebd_tokens):
+                    dong_score = 1.0
+                    text_score_stats["DONG_NM (1.0)"] += 1
+                
+                # 둘 다 일치하지 않는 경우 통계 기록
+                if bld_score == 0.0 and dong_score == 0.0:
+                    text_score_stats["모두 불일치 (0.0)"] += 1
+                
+                # 총점 계산 - area_score + date_score + bld_score + dong_score
+                total_score = area_score + date_score + bld_score + dong_score
                 
                 # 점수 카운트 추적
                 if total_score >= 1.8:
@@ -222,7 +289,8 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                         'bd_idx': bd_idx,
                         'area_score': area_score,
                         'date_score': date_score,
-                        'text_score': text_score,
+                        'bld_score': bld_score,
+                        'dong_score': dong_score,
                         'total_score': total_score,
                         'original_ebd_row': original_ebd_row,
                         'original_bd_row': bd_df_filtered.loc[bd_idx].to_dict(),
@@ -264,7 +332,8 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
             # 점수 정보 추가
             result['AREA_SCORE'] = combo['area_score']
             result['DATE_SCORE'] = combo['date_score']
-            result['TEXT_SCORE'] = combo['text_score']
+            result['BLD_SCORE'] = combo['bld_score']  # BLD_NM 점수
+            result['DONG_SCORE'] = combo['dong_score']  # DONG_NM 점수
             result['TOTAL_SCORE'] = combo['total_score']
             
             # 동점 여부에 따라 매칭 스테이지 설정
@@ -307,7 +376,8 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     if best_combo:
                         original_ebd_row['AREA_SCORE'] = best_combo['area_score']
                         original_ebd_row['DATE_SCORE'] = best_combo['date_score']
-                        original_ebd_row['TEXT_SCORE'] = best_combo['text_score']
+                        original_ebd_row['BLD_SCORE'] = best_combo['bld_score']
+                        original_ebd_row['DONG_SCORE'] = best_combo['dong_score']
                         original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
                 elif best_score > 0:
                     original_ebd_row['MATCH_STAGE'] = '미매칭(점수미달)'
@@ -315,7 +385,8 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     if best_combo:
                         original_ebd_row['AREA_SCORE'] = best_combo['area_score']
                         original_ebd_row['DATE_SCORE'] = best_combo['date_score']
-                        original_ebd_row['TEXT_SCORE'] = best_combo['text_score']
+                        original_ebd_row['BLD_SCORE'] = best_combo['bld_score']
+                        original_ebd_row['DONG_SCORE'] = best_combo['dong_score']
                         original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
                 else:
                     original_ebd_row['MATCH_STAGE'] = '미매칭(후보없음)'
@@ -327,6 +398,11 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
     print("\n면적 점수 분포:")
     for score, count in area_score_stats.items():
         print(f"- {score}점: {count}건")
+    
+    # 텍스트 점수 통계 출력
+    print("\n텍스트 점수 분포:")
+    for score, count in text_score_stats.items():
+        print(f"- {score}: {count}건")
     
     # 리스트를 데이터프레임으로 변환
     result_df = pd.DataFrame(match_results)
@@ -434,6 +510,31 @@ def main():
                 else:
                     print(f"- {stage}: 점수 정보 없음, {len(stage_df)}건")
     
+    # 텍스트 점수 통계 분석 (새로 추가)
+    if 'MATCH_STAGE' in score_result_df.columns:
+        matched_df = score_result_df[~score_result_df['MATCH_STAGE'].str.startswith('미매칭', na=False)]
+        if not matched_df.empty and 'BLD_SCORE' in matched_df.columns and 'DONG_SCORE' in matched_df.columns:
+            print("\n매칭된 레코드의 텍스트 점수 분포:")
+            
+            # BLD_SCORE 분포
+            bld_counts = matched_df['BLD_SCORE'].value_counts()
+            print("BLD_SCORE 분포:")
+            for score, count in bld_counts.items():
+                print(f"- {score}점: {count}건 ({count/len(matched_df)*100:.1f}%)")
+            
+            # DONG_SCORE 분포
+            dong_counts = matched_df['DONG_SCORE'].value_counts()
+            print("DONG_SCORE 분포:")
+            for score, count in dong_counts.items():
+                print(f"- {score}점: {count}건 ({count/len(matched_df)*100:.1f}%)")
+            
+            # 텍스트 점수 조합 분포
+            text_combo_counts = matched_df.groupby(['BLD_SCORE', 'DONG_SCORE']).size()
+            print("텍스트 점수 조합 분포:")
+            for (bld_score, dong_score), count in text_combo_counts.items():
+                total = bld_score + dong_score
+                print(f"- BLD: {bld_score}점, DONG: {dong_score}점 (합계: {total}점): {count}건 ({count/len(matched_df)*100:.1f}%)")
+    
     # 기존 매칭 결과와 새로운 점수 기반 매칭 결과 합치기
     final_result = pd.concat([matched_from_rules, score_result_df], ignore_index=False)
     
@@ -458,6 +559,7 @@ def main():
     # 점수 기반 매칭 결과만 따로 저장
     score_result_df.to_excel("./result/score_only_matching_result_ver1.xlsx", index=False)
     print("4차 점수 기반 매칭 결과가 './result/score_only_matching_result_ver1.xlsx'에 저장되었습니다.")
+    
     
     # 총 실행 시간 출력
     elapsed_time = time.time() - start_time
