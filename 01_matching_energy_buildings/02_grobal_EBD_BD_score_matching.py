@@ -161,7 +161,10 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
         no_recap_count = no_recap_mask.sum()
         print(f"RECAP_PK가 없는 레코드 수: {no_recap_count}개 (이 레코드들은 '미매칭(RECAP없음)'으로 처리됩니다)")
         
-        for _, row in unmatched_ebd[no_recap_mask].iterrows():
+        # 원본 unmatched_ebd에서 토큰 컬럼 전처리
+        ebd_no_recap = preprocess_data(unmatched_ebd[no_recap_mask], ebd_columns)
+        
+        for idx, row in unmatched_ebd[no_recap_mask].iterrows():
             seq_no = row['SEQ_NO']
             original_ebd_row = unmatched_ebd_by_seq[seq_no].copy()
             original_ebd_row['MATCH_STAGE'] = '미매칭(RECAP없음)'
@@ -171,6 +174,19 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
             original_ebd_row['BLD_SCORE'] = 0.0
             original_ebd_row['DONG_SCORE'] = 0.0
             original_ebd_row['TOTAL_SCORE'] = 0.0
+            
+            # 토큰 컬럼 추가
+            if seq_no in ebd_no_recap['SEQ_NO'].values:
+                ebd_row = ebd_no_recap[ebd_no_recap['SEQ_NO'] == seq_no].iloc[0]
+                if 'ebd_unified_tokens' in ebd_row:
+                    original_ebd_row['ebd_unified_tokens'] = ebd_row['ebd_unified_tokens']
+                if '기관명_tokens' in ebd_row:
+                    original_ebd_row['기관명_tokens'] = ebd_row['기관명_tokens']
+                if '건축물명_tokens' in ebd_row:
+                    original_ebd_row['건축물명_tokens'] = ebd_row['건축물명_tokens']
+                if '주소_tokens' in ebd_row:
+                    original_ebd_row['주소_tokens'] = ebd_row['주소_tokens']
+                
             match_results.append(original_ebd_row)
     
     # RECAP_PK가 있는 레코드만 처리
@@ -337,6 +353,25 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                 if key in combo['original_bd_row']:
                     result[key] = combo['original_bd_row'][key]
             
+            # 토큰 컬럼 추가 (EBD와 BD 토큰 보존)
+            # EBD 토큰 보존
+            ebd_row = ebd_processed[ebd_processed['SEQ_NO'] == seq_no].iloc[0]
+            if 'ebd_unified_tokens' in ebd_row:
+                result['ebd_unified_tokens'] = ebd_row['ebd_unified_tokens']
+            if '기관명_tokens' in ebd_row:
+                result['기관명_tokens'] = ebd_row['기관명_tokens']
+            if '건축물명_tokens' in ebd_row:
+                result['건축물명_tokens'] = ebd_row['건축물명_tokens']
+            if '주소_tokens' in ebd_row:
+                result['주소_tokens'] = ebd_row['주소_tokens']
+            
+            # BD 토큰 보존
+            bd_row = bd_processed.loc[bd_idx]
+            if 'BLD_NM_tokens' in bd_row:
+                result['BLD_NM_tokens'] = bd_row['BLD_NM_tokens']
+            if 'DONG_NM_tokens' in bd_row:
+                result['DONG_NM_tokens'] = bd_row['DONG_NM_tokens']
+            
             # 점수 정보 추가
             result['AREA_SCORE'] = combo['area_score']
             result['DATE_SCORE'] = combo['date_score']
@@ -480,6 +515,18 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     original_ebd_row['DONG_SCORE'] = 0.0
                     original_ebd_row['TOTAL_SCORE'] = 0.0
                 
+                # 토큰 컬럼 추가 (EBD 토큰 보존)
+                if seq_no in ebd_processed['SEQ_NO'].values:
+                    ebd_row = ebd_processed[ebd_processed['SEQ_NO'] == seq_no].iloc[0]
+                    if 'ebd_unified_tokens' in ebd_row:
+                        original_ebd_row['ebd_unified_tokens'] = ebd_row['ebd_unified_tokens']
+                    if '기관명_tokens' in ebd_row:
+                        original_ebd_row['기관명_tokens'] = ebd_row['기관명_tokens']
+                    if '건축물명_tokens' in ebd_row:
+                        original_ebd_row['건축물명_tokens'] = ebd_row['건축물명_tokens']
+                    if '주소_tokens' in ebd_row:
+                        original_ebd_row['주소_tokens'] = ebd_row['주소_tokens']
+                
                 match_results.append(original_ebd_row)
                 processed_count += 1
     
@@ -572,6 +619,10 @@ def main():
     # 최적화된 점수 기반 매칭 수행 - 이미 매칭된 BD는 제외
     score_result_df = optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks)
     
+    # 1~3차 매칭 레코드에 BD 토큰 추가 처리 - 사용자 요청으로 제거
+    # 이미 매칭된 레코드는 토큰 정보 불필요
+    print("이미 매칭된 1~3차 레코드는 토큰 정보를 추가하지 않습니다.")
+    
     # 기존 매칭 결과와 새로운 점수 기반 매칭 결과 합치기
     final_result = pd.concat([matched_from_rules, score_result_df], ignore_index=False)
     
@@ -592,11 +643,11 @@ def main():
         'TOTAREA', 'BLD_NM', 'DONG_NM', 'USE_DATE', 'MGM_BLD_PK', 'MATCH_STAGE',
         'EBD_COUNT', 'BD_COUNT', 'EBD_OVER_BD']
     
-    # 토큰 컬럼 (중요: 반드시 보존해야 함)
-    token_columns = ['ebd_unified_tokens', '기관명_tokens', '건축물명_tokens', '주소_tokens', 'BLD_NM_tokens', 'DONG_NM_tokens']
-    
     # 점수 컬럼
     score_columns = ['AREA_SCORE', 'DATE_SCORE', 'BLD_SCORE', 'DONG_SCORE', 'TOTAL_SCORE']
+    
+    # 토큰 컬럼 (중요: 4차 매칭 결과에만 있음)
+    token_columns = ['ebd_unified_tokens', '기관명_tokens', '건축물명_tokens', '주소_tokens', 'BLD_NM_tokens', 'DONG_NM_tokens']
     
     # 최종 컬럼 순서 구성
     final_columns = []
@@ -611,9 +662,9 @@ def main():
         if col in final_result.columns:
             final_columns.append(col)
     
-    # 토큰 컬럼 추가 (반드시 보존)
+    # 토큰 컬럼 추가 (4차 매칭 결과에만 있음)
     for col in token_columns:
-        if col in final_result.columns:
+        if col in final_result.columns and col in score_result_df.columns:
             final_columns.append(col)
     
     # 혹시 누락된 컬럼이 있으면 마지막에 추가
@@ -625,20 +676,39 @@ def main():
     if '_원본순서' in final_result.columns:
         final_result = final_result.drop('_원본순서', axis=1)
     
-    # 컬럼 순서 재정렬
-    final_result = final_result[final_columns]
+    # 컬럼 존재 여부 출력 (디버깅용)
+    print("\n최종 결과에 포함된 토큰 컬럼:")
+    for col in token_columns:
+        token_count = 0
+        if col in final_result.columns:
+            # 4차 매칭된 결과에서만 토큰 카운트
+            token_count = len(score_result_df[score_result_df[col].notna()]) if col in score_result_df.columns else 0
+            print(f"- {col}: 존재함 ({token_count}건 - 4차 매칭 결과만)")
+        else:
+            print(f"- {col}: 존재하지 않음")
+    
+    # 컬럼 순서 재정렬 (존재하는 컬럼만 선택)
+    existing_columns = [col for col in final_columns if col in final_result.columns]
+    final_result = final_result[existing_columns]
     
     # 안전한 파일 저장 (권한 오류 방지)
     try:
-        final_result.to_excel("./result/score_matching_result_ver3.xlsx", index=False)
-        print("\n최종 결과가 './result/score_matching_result_ver3.xlsx'에 저장되었습니다.")
+        final_result.to_excel("./result/score_matching_result_ver5.xlsx", index=False)
+        print("\n최종 결과가 './result/score_matching_result_ver5.xlsx'에 저장되었습니다.")
     except PermissionError:
         # 파일이 열려있는 경우 다른 이름으로 저장 시도
         try:
-            final_result.to_excel("./result/score_matching_result_ver3_new.xlsx", index=False)
-            print("\n파일 권한 문제로 './result/score_matching_result_ver3_new.xlsx'에 저장되었습니다.")
+            final_result.to_excel("./result/score_matching_result_ver5_new.xlsx", index=False)
+            print("\n파일 권한 문제로 './result/score_matching_result_ver5_new.xlsx'에 저장되었습니다.")
         except Exception as e:
             print(f"\n파일 저장 중 오류 발생: {e}")
+            
+        # 마지막 시도: CSV 형식으로 저장
+        try:
+            final_result.to_csv("./result/score_matching_result_ver5_emergency.csv", index=False)
+            print("\n엑셀 저장 실패로 CSV 형식으로 './result/score_matching_result_ver5_emergency.csv'에 저장되었습니다.")
+        except Exception as e:
+            print(f"\n모든 저장 시도 실패: {e}")
     
     # 총 실행 시간 출력
     elapsed_time = time.time() - start_time
