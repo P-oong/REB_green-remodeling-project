@@ -165,6 +165,12 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
             seq_no = row['SEQ_NO']
             original_ebd_row = unmatched_ebd_by_seq[seq_no].copy()
             original_ebd_row['MATCH_STAGE'] = '미매칭(RECAP없음)'
+            # 점수 정보 추가 (0점으로 설정)
+            original_ebd_row['AREA_SCORE'] = 0.0
+            original_ebd_row['DATE_SCORE'] = 0.0
+            original_ebd_row['BLD_SCORE'] = 0.0
+            original_ebd_row['DONG_SCORE'] = 0.0
+            original_ebd_row['TOTAL_SCORE'] = 0.0
             match_results.append(original_ebd_row)
     
     # RECAP_PK가 있는 레코드만 처리
@@ -325,9 +331,11 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
             result = combo['original_ebd_row'].copy()
             
             # BD 정보 추가
-            for key, value in combo['original_bd_row'].items():
-                if key not in result:
-                    result[key] = value
+            # 필요한 BD 컬럼만 추가
+            bd_essential_columns = ['MGM_BLD_PK', 'TOTAREA', 'BLD_NM', 'DONG_NM', 'USE_DATE']
+            for key in bd_essential_columns:
+                if key in combo['original_bd_row']:
+                    result[key] = combo['original_bd_row'][key]
             
             # 점수 정보 추가
             result['AREA_SCORE'] = combo['area_score']
@@ -355,23 +363,81 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
             if seq_no not in matched_seq_nos:
                 original_ebd_row = unmatched_ebd_by_seq[seq_no].copy()
                 
-                # 해당 EBD의 최고 점수 찾기
+                # 해당 EBD의 최고 점수 찾기 (1.8 이상 & 1.8 미만 모두 포함)
                 best_score = 0.0
                 best_combo = None
+                best_combo_under_threshold = None
+                best_score_under_threshold = 0.0
                 has_tie = False
                 
+                # 점수가 1.8 이상인 조합 중 최고 점수 찾기
                 for combo in all_combinations:
                     if combo['seq_no'] == seq_no and combo['total_score'] > best_score:
                         best_score = combo['total_score']
                         best_combo = combo
                         has_tie = combo['has_tie']
+                                
+                # 전체 BD와의 점수 계산 결과 중 1.8 미만인 최고 점수 찾기
+                for bd_idx, bd_row in bd_recap.iterrows():
+                    # 이미 매칭된 BD는 제외
+                    if bd_row['MGM_BLD_PK'] in matched_bd_indices:
+                        continue
+                                
+                    # 점수 계산
+                    area_score = calculate_area_score(ebd_row['연면적'], bd_row['TOTAREA'])
+                    
+                    # 날짜 점수
+                    date_score = 0.0
+                    if not pd.isna(ebd_row['사용승인연도']) and not pd.isna(bd_row['USE_DATE']):
+                        try:
+                            ebd_date = str(int(ebd_row['사용승인연도']))
+                            bd_date = str(int(bd_row['USE_DATE']))
+                            if ebd_date == bd_date:
+                                date_score = 1.0
+                        except:
+                            pass
+                    
+                    # 텍스트 점수
+                    bld_score = 0.0
+                    dong_score = 0.0
+                    
+                    # EBD 통합 토큰과 BD의 BLD_NM 토큰 비교
+                    ebd_tokens = ebd_row['ebd_unified_tokens']
+                    bld_nm_tokens = bd_row['BLD_NM_tokens']
+                    
+                    # 공통 토큰이 있는지 확인
+                    if any(token in bld_nm_tokens for token in ebd_tokens):
+                        bld_score = 0.8
+                    
+                    # EBD 통합 토큰과 BD의 DONG_NM 토큰 비교
+                    dong_nm_tokens = bd_row['DONG_NM_tokens']
+                    
+                    # 공통 토큰이 있는지 확인
+                    if any(token in dong_nm_tokens for token in ebd_tokens):
+                        dong_score = 1.0
+                    
+                    # 총점 계산
+                    total_score = area_score + date_score + bld_score + dong_score
+                    
+                    # 1.8 미만인 경우, 최고 점수 기록
+                    if total_score < 1.8 and total_score > best_score_under_threshold:
+                        best_score_under_threshold = total_score
+                        best_combo_under_threshold = {
+                            'area_score': area_score,
+                            'date_score': date_score,
+                            'bld_score': bld_score,
+                            'dong_score': dong_score,
+                            'total_score': total_score
+                        }
                 
                 # 매칭되지 않은 이유에 따라 상태 설정
                 if best_score >= 1.8:
+                    # 1.8점 이상 조합이 있는 경우
                     if has_tie:
-                        original_ebd_row['MATCH_STAGE'] = '미매칭(동점후보)' # 동점후보는 사람 검수 필수 (헝가리안 알고리즘 등 최적 매칭은 불가능으로 판단)
+                        original_ebd_row['MATCH_STAGE'] = '미매칭(동점후보)'
                     else:
                         original_ebd_row['MATCH_STAGE'] = '미매칭(더높은점수존재)'
+                    
                     # 점수 정보 추가 (best_combo가 None이 아님을 확인)
                     if best_combo:
                         original_ebd_row['AREA_SCORE'] = best_combo['area_score']
@@ -379,17 +445,40 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                         original_ebd_row['BLD_SCORE'] = best_combo['bld_score']
                         original_ebd_row['DONG_SCORE'] = best_combo['dong_score']
                         original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
-                elif best_score > 0:
+                elif best_score_under_threshold >= 0:
+                    # 1.8점 미만이지만 점수가 있는 경우
                     original_ebd_row['MATCH_STAGE'] = '미매칭(점수미달)'
-                    # 점수 정보 추가 (best_combo가 None이 아님을 확인)
-                    if best_combo:
-                        original_ebd_row['AREA_SCORE'] = best_combo['area_score']
-                        original_ebd_row['DATE_SCORE'] = best_combo['date_score']
-                        original_ebd_row['BLD_SCORE'] = best_combo['bld_score']
-                        original_ebd_row['DONG_SCORE'] = best_combo['dong_score']
-                        original_ebd_row['TOTAL_SCORE'] = best_combo['total_score']
+                    
+                    # 최고 점수 기록
+                    if best_combo_under_threshold is not None:
+                        original_ebd_row['AREA_SCORE'] = best_combo_under_threshold['area_score']
+                        original_ebd_row['DATE_SCORE'] = best_combo_under_threshold['date_score']
+                        original_ebd_row['BLD_SCORE'] = best_combo_under_threshold['bld_score']
+                        original_ebd_row['DONG_SCORE'] = best_combo_under_threshold['dong_score']
+                        original_ebd_row['TOTAL_SCORE'] = best_combo_under_threshold['total_score']
+                    else:
+                        # best_combo_under_threshold가 None인 경우 모든 점수를 0으로 설정
+                        original_ebd_row['AREA_SCORE'] = 0.0
+                        original_ebd_row['DATE_SCORE'] = 0.0
+                        original_ebd_row['BLD_SCORE'] = 0.0
+                        original_ebd_row['DONG_SCORE'] = 0.0
+                        original_ebd_row['TOTAL_SCORE'] = 0.0
                 else:
-                    original_ebd_row['MATCH_STAGE'] = '미매칭(후보없음)'
+                    # 후보가 없거나 모든 점수가 0점인 경우
+                    # BD가 있지만 이미 매칭된 경우와 진짜 후보가 없는 경우 구분
+                    has_bd_but_matched = bd_recap.shape[0] > 0 and all(bd_pk in matched_bd_indices for bd_pk in bd_recap['MGM_BLD_PK'])
+                    
+                    if has_bd_but_matched:
+                        original_ebd_row['MATCH_STAGE'] = '미매칭(이미매칭)'
+                    else:
+                        original_ebd_row['MATCH_STAGE'] = '미매칭(후보없음)'
+                    
+                    # 점수 정보 추가 (0점으로 설정)
+                    original_ebd_row['AREA_SCORE'] = 0.0
+                    original_ebd_row['DATE_SCORE'] = 0.0
+                    original_ebd_row['BLD_SCORE'] = 0.0
+                    original_ebd_row['DONG_SCORE'] = 0.0
+                    original_ebd_row['TOTAL_SCORE'] = 0.0
                 
                 match_results.append(original_ebd_row)
                 processed_count += 1
@@ -483,58 +572,6 @@ def main():
     # 최적화된 점수 기반 매칭 수행 - 이미 매칭된 BD는 제외
     score_result_df = optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks)
     
-    # 통계 출력
-    stage_counts = score_result_df['MATCH_STAGE'].value_counts()
-    print("\n4차 점수 기반 매칭 결과:")
-    for stage, count in stage_counts.items():
-        print(f"- {stage}: {count}건")
-    
-    # 미매칭 레코드의 총점 분석
-    if 'MATCH_STAGE' in score_result_df.columns and 'TOTAL_SCORE' in score_result_df.columns:
-        unmatched_df = score_result_df[score_result_df['MATCH_STAGE'].str.startswith('미매칭', na=False)]
-        if not unmatched_df.empty:
-            # 미매칭 유형별 총점 분포
-            print("\n미매칭 유형별 총점 분포:")
-            for stage in unmatched_df['MATCH_STAGE'].unique():
-                stage_df = unmatched_df[unmatched_df['MATCH_STAGE'] == stage]
-                
-                # '미매칭(RECAP없음)', '미매칭(후보없음)' 등의 경우 점수가 없을 수 있음
-                if 'TOTAL_SCORE' in stage_df.columns:
-                    stage_df = stage_df.dropna(subset=['TOTAL_SCORE'])
-                    if not stage_df.empty:
-                        mean_score = stage_df['TOTAL_SCORE'].mean()
-                        max_score = stage_df['TOTAL_SCORE'].max()
-                        print(f"- {stage}: 평균 {mean_score:.2f}점, 최대 {max_score:.2f}점, {len(stage_df)}건")
-                    else:
-                        print(f"- {stage}: 점수 정보 없음, {len(unmatched_df[unmatched_df['MATCH_STAGE'] == stage])}건")
-                else:
-                    print(f"- {stage}: 점수 정보 없음, {len(stage_df)}건")
-    
-    # 텍스트 점수 통계 분석 (새로 추가)
-    if 'MATCH_STAGE' in score_result_df.columns:
-        matched_df = score_result_df[~score_result_df['MATCH_STAGE'].str.startswith('미매칭', na=False)]
-        if not matched_df.empty and 'BLD_SCORE' in matched_df.columns and 'DONG_SCORE' in matched_df.columns:
-            print("\n매칭된 레코드의 텍스트 점수 분포:")
-            
-            # BLD_SCORE 분포
-            bld_counts = matched_df['BLD_SCORE'].value_counts()
-            print("BLD_SCORE 분포:")
-            for score, count in bld_counts.items():
-                print(f"- {score}점: {count}건 ({count/len(matched_df)*100:.1f}%)")
-            
-            # DONG_SCORE 분포
-            dong_counts = matched_df['DONG_SCORE'].value_counts()
-            print("DONG_SCORE 분포:")
-            for score, count in dong_counts.items():
-                print(f"- {score}점: {count}건 ({count/len(matched_df)*100:.1f}%)")
-            
-            # 텍스트 점수 조합 분포
-            text_combo_counts = matched_df.groupby(['BLD_SCORE', 'DONG_SCORE']).size()
-            print("텍스트 점수 조합 분포:")
-            for (bld_score, dong_score), count in text_combo_counts.items():
-                total = bld_score + dong_score
-                print(f"- BLD: {bld_score}점, DONG: {dong_score}점 (합계: {total}점): {count}건 ({count/len(matched_df)*100:.1f}%)")
-    
     # 기존 매칭 결과와 새로운 점수 기반 매칭 결과 합치기
     final_result = pd.concat([matched_from_rules, score_result_df], ignore_index=False)
     
@@ -547,19 +584,61 @@ def main():
     for stage, count in final_counts.items():
         print(f"- {stage}: {count}건")
     
+    # 결과 저장
+    os.makedirs("./result", exist_ok=True)
+    
+    # 원하는 컬럼 순서 정의
+    desired_columns = ['SEQ_NO', 'RECAP_PK', '연면적', '사용승인연도', '기관명', '건축물명', '주소', '지상', '지하',
+        'TOTAREA', 'BLD_NM', 'DONG_NM', 'USE_DATE', 'MGM_BLD_PK', 'MATCH_STAGE',
+        'EBD_COUNT', 'BD_COUNT', 'EBD_OVER_BD']
+    
+    # 토큰 컬럼 (중요: 반드시 보존해야 함)
+    token_columns = ['ebd_unified_tokens', '기관명_tokens', '건축물명_tokens', '주소_tokens', 'BLD_NM_tokens', 'DONG_NM_tokens']
+    
+    # 점수 컬럼
+    score_columns = ['AREA_SCORE', 'DATE_SCORE', 'BLD_SCORE', 'DONG_SCORE', 'TOTAL_SCORE']
+    
+    # 최종 컬럼 순서 구성
+    final_columns = []
+    
+    # 기본 컬럼 추가
+    for col in desired_columns:
+        if col in final_result.columns:
+            final_columns.append(col)
+    
+    # 점수 컬럼 추가
+    for col in score_columns:
+        if col in final_result.columns:
+            final_columns.append(col)
+    
+    # 토큰 컬럼 추가 (반드시 보존)
+    for col in token_columns:
+        if col in final_result.columns:
+            final_columns.append(col)
+    
+    # 혹시 누락된 컬럼이 있으면 마지막에 추가
+    for col in final_result.columns:
+        if col not in final_columns and col != '_원본순서':
+            final_columns.append(col)
+    
     # 임시 순서 컬럼 제거
     if '_원본순서' in final_result.columns:
         final_result = final_result.drop('_원본순서', axis=1)
     
-    # 결과 저장
-    os.makedirs("./result", exist_ok=True)
-    final_result.to_excel("./result/score_matching_result_ver1.xlsx", index=False)
-    print("\n최종 결과가 './result/score_matching_result_ver1.xlsx'에 저장되었습니다.")
+    # 컬럼 순서 재정렬
+    final_result = final_result[final_columns]
     
-    # 점수 기반 매칭 결과만 따로 저장
-    score_result_df.to_excel("./result/score_only_matching_result_ver1.xlsx", index=False)
-    print("4차 점수 기반 매칭 결과가 './result/score_only_matching_result_ver1.xlsx'에 저장되었습니다.")
-    
+    # 안전한 파일 저장 (권한 오류 방지)
+    try:
+        final_result.to_excel("./result/score_matching_result_ver3.xlsx", index=False)
+        print("\n최종 결과가 './result/score_matching_result_ver3.xlsx'에 저장되었습니다.")
+    except PermissionError:
+        # 파일이 열려있는 경우 다른 이름으로 저장 시도
+        try:
+            final_result.to_excel("./result/score_matching_result_ver3_new.xlsx", index=False)
+            print("\n파일 권한 문제로 './result/score_matching_result_ver3_new.xlsx'에 저장되었습니다.")
+        except Exception as e:
+            print(f"\n파일 저장 중 오류 발생: {e}")
     
     # 총 실행 시간 출력
     elapsed_time = time.time() - start_time
