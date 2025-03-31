@@ -31,10 +31,16 @@ def load_data():
     기존 매칭 결과와 BD 데이터를 로드
     """
     # 기존 매칭 결과 로드
-    rule_result_df = pd.read_excel("./result/rule_matching_result_ver3.xlsx")
+    rule_result_df = pd.read_excel("./result/rule_matching_result_ver5.xlsx")
     
     # BD 데이터 로드
     bd_df = pd.read_excel("./data/BD_data_all.xlsx")
+    
+    # BD 데이터의 USE_DATE 컬럼을 datetime 형식으로 변환
+    if 'USE_DATE' in bd_df.columns:
+        # 이미 날짜 형식(2000-06-02)이므로 바로 datetime으로 변환
+        bd_df['USE_DATE'] = pd.to_datetime(bd_df['USE_DATE'], errors='coerce')
+        print("BD 데이터의 USE_DATE를 datetime 형식으로 변환했습니다.")
     
     return rule_result_df, bd_df
 
@@ -265,9 +271,14 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                 date_score = 0.0
                 if not pd.isna(ebd_row['사용승인연도']) and not pd.isna(bd_row['USE_DATE']):
                     try:
-                        ebd_date = str(int(ebd_row['사용승인연도']))
-                        bd_date = str(int(bd_row['USE_DATE']))
-                        if ebd_date == bd_date:
+                        # 이미 두 데이터 모두 datetime 형식이므로 바로 비교 가능
+                        ebd_date = ebd_row['사용승인연도']
+                        bd_date = bd_row['USE_DATE']
+                        
+                        # 두 날짜의 연월일 비교
+                        if (ebd_date.year == bd_date.year and 
+                            ebd_date.month == bd_date.month and 
+                            ebd_date.day == bd_date.day):
                             date_score = 1.0
                     except:
                         pass
@@ -425,9 +436,14 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     date_score = 0.0
                     if not pd.isna(ebd_row['사용승인연도']) and not pd.isna(bd_row['USE_DATE']):
                         try:
-                            ebd_date = str(int(ebd_row['사용승인연도']))
-                            bd_date = str(int(bd_row['USE_DATE']))
-                            if ebd_date == bd_date:
+                            # 이미 두 데이터 모두 datetime 형식이므로 바로 비교 가능
+                            ebd_date = ebd_row['사용승인연도']
+                            bd_date = bd_row['USE_DATE']
+                            
+                            # 두 날짜의 연월일 비교
+                            if (ebd_date.year == bd_date.year and 
+                                ebd_date.month == bd_date.month and 
+                                ebd_date.day == bd_date.day):
                                 date_score = 1.0
                         except:
                             pass
@@ -693,20 +709,20 @@ def main():
     
     # 안전한 파일 저장 (권한 오류 방지)
     try:
-        final_result.to_excel("./result/score_matching_result_ver5.xlsx", index=False)
-        print("\n최종 결과가 './result/score_matching_result_ver5.xlsx'에 저장되었습니다.")
+        final_result.to_excel("./result/score_matching_result_ver6.xlsx", index=False)
+        print("\n최종 결과가 './result/score_matching_result_ver6.xlsx'에 저장되었습니다.")
     except PermissionError:
         # 파일이 열려있는 경우 다른 이름으로 저장 시도
         try:
-            final_result.to_excel("./result/score_matching_result_ver5_new.xlsx", index=False)
-            print("\n파일 권한 문제로 './result/score_matching_result_ver5_new.xlsx'에 저장되었습니다.")
+            final_result.to_excel("./result/score_matching_result_ver6_new.xlsx", index=False)
+            print("\n파일 권한 문제로 './result/score_matching_result_ver6_new.xlsx'에 저장되었습니다.")
         except Exception as e:
             print(f"\n파일 저장 중 오류 발생: {e}")
             
         # 마지막 시도: CSV 형식으로 저장
         try:
-            final_result.to_csv("./result/score_matching_result_ver5_emergency.csv", index=False)
-            print("\n엑셀 저장 실패로 CSV 형식으로 './result/score_matching_result_ver5_emergency.csv'에 저장되었습니다.")
+            final_result.to_csv("./result/score_matching_result_ver6_emergency.csv", index=False)
+            print("\n엑셀 저장 실패로 CSV 형식으로 './result/score_matching_result_ver6_emergency.csv'에 저장되었습니다.")
         except Exception as e:
             print(f"\n모든 저장 시도 실패: {e}")
     
