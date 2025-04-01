@@ -33,6 +33,11 @@ def load_data():
     # 기존 매칭 결과 로드
     rule_result_df = pd.read_excel("./result/rule_matching_result_ver5.xlsx")
     
+    # EBD 데이터의 '사용승인연도' 컬럼을 datetime 형식으로 변환
+    if '사용승인연도' in rule_result_df.columns:
+        rule_result_df['사용승인연도'] = pd.to_datetime(rule_result_df['사용승인연도'], errors='coerce')
+        print("EBD 데이터의 사용승인연도를 datetime 형식으로 변환했습니다.")
+    
     # BD 데이터 로드
     bd_df = pd.read_excel("./data/BD_data_all.xlsx")
     
@@ -271,16 +276,16 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                 date_score = 0.0
                 if not pd.isna(ebd_row['사용승인연도']) and not pd.isna(bd_row['USE_DATE']):
                     try:
-                        # 이미 두 데이터 모두 datetime 형식이므로 바로 비교 가능
-                        ebd_date = ebd_row['사용승인연도']
-                        bd_date = bd_row['USE_DATE']
+                        # datetime을 'YYYY-MM-DD' 형식의 문자열로 변환하여 비교
+                        ebd_date_str = pd.to_datetime(ebd_row['사용승인연도']).strftime('%Y-%m-%d')
+                        bd_date_str = pd.to_datetime(bd_row['USE_DATE']).strftime('%Y-%m-%d')
                         
-                        # 두 날짜의 연월일 비교
-                        if (ebd_date.year == bd_date.year and 
-                            ebd_date.month == bd_date.month and 
-                            ebd_date.day == bd_date.day):
+                        # 문자열로 변환된 날짜 비교
+                        if ebd_date_str == bd_date_str:
                             date_score = 1.0
                     except:
+                        # 오류 발생시 디버깅을 위한 정보 출력
+                        print(f"날짜 비교 오류: EBD={ebd_row['사용승인연도']}, BD={bd_row['USE_DATE']}")
                         pass
                 
                 # 3. 텍스트 점수 - 토큰 기반 새로운 로직
@@ -436,16 +441,16 @@ def optimize_score_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     date_score = 0.0
                     if not pd.isna(ebd_row['사용승인연도']) and not pd.isna(bd_row['USE_DATE']):
                         try:
-                            # 이미 두 데이터 모두 datetime 형식이므로 바로 비교 가능
-                            ebd_date = ebd_row['사용승인연도']
-                            bd_date = bd_row['USE_DATE']
+                            # datetime을 'YYYY-MM-DD' 형식의 문자열로 변환하여 비교
+                            ebd_date_str = pd.to_datetime(ebd_row['사용승인연도']).strftime('%Y-%m-%d')
+                            bd_date_str = pd.to_datetime(bd_row['USE_DATE']).strftime('%Y-%m-%d')
                             
-                            # 두 날짜의 연월일 비교
-                            if (ebd_date.year == bd_date.year and 
-                                ebd_date.month == bd_date.month and 
-                                ebd_date.day == bd_date.day):
+                            # 문자열로 변환된 날짜 비교
+                            if ebd_date_str == bd_date_str:
                                 date_score = 1.0
                         except:
+                            # 오류 발생시 디버깅을 위한 정보 출력
+                            print(f"날짜 비교 오류: EBD={ebd_row['사용승인연도']}, BD={bd_row['USE_DATE']}")
                             pass
                     
                     # 텍스트 점수
@@ -608,6 +613,8 @@ def main():
     
     # 데이터 로드
     rule_result_df, bd_df = load_data()
+    # 원본 데이터 백업 (모든 레코드 보존을 위해)
+    original_rule_result_df = rule_result_df.copy()
     print(f"데이터 로드 완료: EBD {len(rule_result_df)}개, BD {len(bd_df)}개")
     
     # 원본 순서 보존을 위한 컬럼 추가
@@ -642,8 +649,51 @@ def main():
     # 기존 매칭 결과와 새로운 점수 기반 매칭 결과 합치기
     final_result = pd.concat([matched_from_rules, score_result_df], ignore_index=False)
     
+    # 모든 원본 데이터가 결과에 포함되었는지 확인
+    if 'SEQ_NO' in original_rule_result_df.columns and 'SEQ_NO' in final_result.columns:
+        original_seq_nos = set(original_rule_result_df['SEQ_NO'].dropna())
+        result_seq_nos = set(final_result['SEQ_NO'].dropna())
+        
+        # 누락된 SEQ_NO 식별
+        missing_seq_nos = original_seq_nos - result_seq_nos
+        
+        if missing_seq_nos:
+            missing_count = len(missing_seq_nos)
+            print(f"\n경고: {missing_count}건의 데이터가 결과에서 누락되었습니다. 복구를 시도합니다.")
+            
+            # 누락된 데이터 추출
+            missing_rows = original_rule_result_df[original_rule_result_df['SEQ_NO'].isin(missing_seq_nos)].copy()
+            
+            # 누락된 데이터에 점수 컬럼 추가 (0점으로 설정)
+            missing_rows['AREA_SCORE'] = 0.0
+            missing_rows['DATE_SCORE'] = 0.0
+            missing_rows['BLD_SCORE'] = 0.0
+            missing_rows['DONG_SCORE'] = 0.0
+            missing_rows['TOTAL_SCORE'] = 0.0
+            
+            # 매칭 단계 설정 (원래 상태를 유지하되, 누락 표시 추가)
+            if 'MATCH_STAGE' in missing_rows.columns:
+                # 기존 상태 문자열 확인 후 "(누락복구)"를 추가
+                missing_rows['MATCH_STAGE'] = missing_rows['MATCH_STAGE'].astype(str) + "(누락복구)"
+            else:
+                missing_rows['MATCH_STAGE'] = "미매칭(누락복구)"
+            
+            # 원본 순서 추가
+            if '_원본순서' not in missing_rows.columns and '_원본순서' in original_rule_result_df.columns:
+                missing_rows = pd.merge(
+                    missing_rows, 
+                    original_rule_result_df[['SEQ_NO', '_원본순서']], 
+                    on='SEQ_NO', 
+                    how='left'
+                )
+            
+            # 누락 복구 데이터를 결과에 추가
+            final_result = pd.concat([final_result, missing_rows], ignore_index=False)
+            print(f"{missing_count}건의 누락 데이터를 결과에 추가했습니다.")
+    
     # 원본 순서대로 정렬
-    final_result = final_result.sort_values('_원본순서')
+    if '_원본순서' in final_result.columns:
+        final_result = final_result.sort_values('_원본순서')
     
     # 통계 출력
     final_counts = final_result['MATCH_STAGE'].value_counts()
@@ -702,6 +752,16 @@ def main():
             print(f"- {col}: 존재함 ({token_count}건 - 4차 매칭 결과만)")
         else:
             print(f"- {col}: 존재하지 않음")
+    
+    # 누락 확인
+    print("\n데이터 검증:")
+    print(f"원본 EBD 데이터: {len(original_rule_result_df)}건")
+    print(f"최종 결과 데이터: {len(final_result)}건")
+    
+    if len(original_rule_result_df) == len(final_result):
+        print("✅ 모든 데이터가 보존되었습니다.")
+    else:
+        print(f"⚠️ 데이터 수 불일치: {len(original_rule_result_df) - len(final_result)}건 차이")
     
     # 컬럼 순서 재정렬 (존재하는 컬럼만 선택)
     existing_columns = [col for col in final_columns if col in final_result.columns]
