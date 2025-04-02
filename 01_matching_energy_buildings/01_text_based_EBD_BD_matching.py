@@ -103,14 +103,14 @@ def preprocess_data(ebd_df, bd_df):
 
 def count_common_tokens(ebd_tokens, bd_tokens):
     """
-    두 토큰 리스트 간의 공통 토큰 개수를 반환
+    두 토큰 리스트 간의 공통 토큰 개수와 일치하는 토큰 목록을 반환
     """
     if not ebd_tokens or not bd_tokens:
-        return 0
+        return 0, []
     
-    # 공통 토큰 개수 세기
-    common_count = sum(1 for token in ebd_tokens if token in bd_tokens)
-    return common_count
+    # 공통 토큰 찾기
+    common_tokens = [token for token in ebd_tokens if token in bd_tokens]
+    return len(common_tokens), common_tokens
 
 def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
     """
@@ -143,6 +143,10 @@ def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
             seq_no = row['SEQ_NO']
             original_ebd_row = unmatched_ebd_by_seq[seq_no].copy()
             original_ebd_row['MATCH_STAGE'] = '미매칭(RECAP없음)'
+            # 일치 토큰 정보 초기화
+            original_ebd_row['MATCH_TOKEN_COUNT'] = 0
+            original_ebd_row['MATCHED_BLD_TOKENS'] = []
+            original_ebd_row['MATCHED_DONG_TOKENS'] = []
             match_results.append(original_ebd_row)
     
     # RECAP_PK가 있는 레코드만 처리
@@ -175,6 +179,10 @@ def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                 seq_no = ebd_row['SEQ_NO']
                 original_ebd_row = unmatched_ebd_by_seq[seq_no].copy()
                 original_ebd_row['MATCH_STAGE'] = '미매칭(후보없음)'
+                # 일치 토큰 정보 초기화
+                original_ebd_row['MATCH_TOKEN_COUNT'] = 0
+                original_ebd_row['MATCHED_BLD_TOKENS'] = []
+                original_ebd_row['MATCHED_DONG_TOKENS'] = []
                 match_results.append(original_ebd_row)
                 unmatched_count += 1
             continue
@@ -188,6 +196,7 @@ def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
             # DONG_NM 토큰 일치 개수 확인
             dong_matches = []
             max_dong_match = 0
+            best_dong_tokens = []
             
             for _, bd_row in bd_recap.iterrows():
                 # 이미 매칭된 BD는 제외
@@ -199,13 +208,14 @@ def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     continue
                 
                 # DONG_NM 토큰과 EBD 통합 토큰의 일치 개수 계산
-                match_count = count_common_tokens(ebd_tokens, bd_row['DONG_NM_tokens'])
+                match_count, matched_tokens = count_common_tokens(ebd_tokens, bd_row['DONG_NM_tokens'])
                 
                 if match_count > 0:
                     # 더 많은 토큰이 일치하는 경우, 기존 결과 초기화
                     if match_count > max_dong_match:
                         max_dong_match = match_count
                         dong_matches = [bd_row]
+                        best_dong_tokens = matched_tokens
                     # 동일한 수의 토큰이 일치하는 경우, 결과에 추가
                     elif match_count == max_dong_match:
                         dong_matches.append(bd_row)
@@ -218,8 +228,16 @@ def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     if key in bd_match:
                         original_ebd_row[key] = bd_match[key]
                 
-                # 일치 토큰 개수 정보 추가
+                # BD 토큰 컬럼 추가
+                if 'BLD_NM_tokens' in bd_match:
+                    original_ebd_row['BLD_NM_tokens'] = bd_match['BLD_NM_tokens']
+                if 'DONG_NM_tokens' in bd_match:
+                    original_ebd_row['DONG_NM_tokens'] = bd_match['DONG_NM_tokens']
+                
+                # 일치 토큰 개수와 일치하는 토큰 목록 추가
                 original_ebd_row['MATCH_TOKEN_COUNT'] = max_dong_match
+                original_ebd_row['MATCHED_DONG_TOKENS'] = best_dong_tokens
+                original_ebd_row['MATCHED_BLD_TOKENS'] = []  # DONG 매칭이므로 BLD 토큰은 비움
                 original_ebd_row['MATCH_STAGE'] = '4차(DONG일치)'
                 match_results.append(original_ebd_row)
                 
@@ -231,6 +249,7 @@ def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
             # DONG_NM 일치 후보가 없거나 여러 개인 경우, BLD_NM 토큰으로 시도
             bld_matches = []
             max_bld_match = 0
+            best_bld_tokens = []
             
             for _, bd_row in bd_recap.iterrows():
                 # 이미 매칭된 BD는 제외
@@ -242,13 +261,14 @@ def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     continue
                 
                 # BLD_NM 토큰과 EBD 통합 토큰의 일치 개수 계산
-                match_count = count_common_tokens(ebd_tokens, bd_row['BLD_NM_tokens'])
+                match_count, matched_tokens = count_common_tokens(ebd_tokens, bd_row['BLD_NM_tokens'])
                 
                 if match_count > 0:
                     # 더 많은 토큰이 일치하는 경우, 기존 결과 초기화
                     if match_count > max_bld_match:
                         max_bld_match = match_count
                         bld_matches = [bd_row]
+                        best_bld_tokens = matched_tokens
                     # 동일한 수의 토큰이 일치하는 경우, 결과에 추가
                     elif match_count == max_bld_match:
                         bld_matches.append(bd_row)
@@ -261,8 +281,16 @@ def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
                     if key in bd_match:
                         original_ebd_row[key] = bd_match[key]
                 
-                # 일치 토큰 개수 정보 추가
+                # BD 토큰 컬럼 추가
+                if 'BLD_NM_tokens' in bd_match:
+                    original_ebd_row['BLD_NM_tokens'] = bd_match['BLD_NM_tokens']
+                if 'DONG_NM_tokens' in bd_match:
+                    original_ebd_row['DONG_NM_tokens'] = bd_match['DONG_NM_tokens']
+                
+                # 일치 토큰 개수와 일치하는 토큰 목록 추가
                 original_ebd_row['MATCH_TOKEN_COUNT'] = max_bld_match
+                original_ebd_row['MATCHED_BLD_TOKENS'] = best_bld_tokens
+                original_ebd_row['MATCHED_DONG_TOKENS'] = []  # BLD 매칭이므로 DONG 토큰은 비움
                 original_ebd_row['MATCH_STAGE'] = '4차(BLD일치)'
                 match_results.append(original_ebd_row)
                 
@@ -274,10 +302,22 @@ def text_based_matching(unmatched_ebd, bd_df, already_matched_bd_pks):
             # 매칭되지 않은 경우
             original_ebd_row['MATCH_STAGE'] = '미매칭'
             
-            # 최고 일치 토큰 개수 기록 (미매칭의 경우에도)
+            # 최고 일치 토큰 개수와 일치하는 토큰 목록 기록 (미매칭의 경우에도)
             max_match_count = max(max_dong_match, max_bld_match)
             if max_match_count > 0:
                 original_ebd_row['MATCH_TOKEN_COUNT'] = max_match_count
+                
+                # DONG과 BLD 중 더 높은 점수를 가진 쪽의 토큰을 기록
+                if max_dong_match >= max_bld_match:
+                    original_ebd_row['MATCHED_DONG_TOKENS'] = best_dong_tokens
+                    original_ebd_row['MATCHED_BLD_TOKENS'] = []
+                else:
+                    original_ebd_row['MATCHED_BLD_TOKENS'] = best_bld_tokens
+                    original_ebd_row['MATCHED_DONG_TOKENS'] = []
+            else:
+                original_ebd_row['MATCH_TOKEN_COUNT'] = 0
+                original_ebd_row['MATCHED_BLD_TOKENS'] = []
+                original_ebd_row['MATCHED_DONG_TOKENS'] = []
             
             match_results.append(original_ebd_row)
             unmatched_count += 1
@@ -333,9 +373,18 @@ def main():
     
     # 통계 출력
     final_counts = final_result['MATCH_STAGE'].value_counts()
+    total_ebd_count = 4194  # 총 EBD 데이터 건수
+    
     print("\n최종 매칭 결과:")
     for stage, count in final_counts.items():
-        print(f"- {stage}: {count}건")
+        percentage = (count / total_ebd_count) * 100
+        print(f"- {stage}: {count}건 ({percentage:.2f}%)")
+    
+    # 매칭 성공률 계산 (1차, 2차, 3차, 4차 모두 포함)
+    matched_count = sum(count for stage, count in final_counts.items() if not stage.startswith('미매칭'))
+    matched_percentage = (matched_count / total_ebd_count) * 100
+    print(f"\n총 매칭 성공: {matched_count}건 ({matched_percentage:.2f}%)")
+    print(f"총 미매칭: {total_ebd_count - matched_count}건 ({100 - matched_percentage:.2f}%)")
     
     # 결과 저장
     os.makedirs("./result", exist_ok=True)
@@ -346,7 +395,8 @@ def main():
         'EBD_COUNT', 'BD_COUNT', 'EBD_OVER_BD']
     
     # 토큰 컬럼
-    token_columns = ['ebd_unified_tokens', '기관명_tokens', '건축물명_tokens', '주소_tokens', 'BLD_NM_tokens', 'DONG_NM_tokens']
+    token_columns = ['ebd_unified_tokens', '기관명_tokens', '건축물명_tokens', '주소_tokens', 
+                    'BLD_NM_tokens', 'DONG_NM_tokens', 'MATCHED_BLD_TOKENS', 'MATCHED_DONG_TOKENS']
     
     # 최종 컬럼 순서 구성
     final_columns = []
@@ -372,20 +422,20 @@ def main():
     
     # 안전한 파일 저장 (권한 오류 방지)
     try:
-        final_result.to_excel("./result/text_matching_result_ver1.xlsx", index=False)
-        print("\n최종 결과가 './result/text_matching_result_ver1.xlsx'에 저장되었습니다.")
+        final_result.to_excel("./result/text_matching_result_ver2.xlsx", index=False)
+        print("\n최종 결과가 './result/text_matching_result_ver2.xlsx'에 저장되었습니다.")
     except PermissionError:
         # 파일이 열려있는 경우 다른 이름으로 저장 시도
         try:
-            final_result.to_excel("./result/text_matching_result_ver1_new.xlsx", index=False)
-            print("\n파일 권한 문제로 './result/text_matching_result_ver1_new.xlsx'에 저장되었습니다.")
+            final_result.to_excel("./result/text_matching_result_ver2_new.xlsx", index=False)
+            print("\n파일 권한 문제로 './result/text_matching_result_ver2_new.xlsx'에 저장되었습니다.")
         except Exception as e:
             print(f"\n파일 저장 중 오류 발생: {e}")
             
         # 마지막 시도: CSV 형식으로 저장
         try:
-            final_result.to_csv("./result/text_matching_result_ver1_emergency.csv", index=False)
-            print("\n엑셀 저장 실패로 CSV 형식으로 './result/text_matching_result_ver1_emergency.csv'에 저장되었습니다.")
+            final_result.to_csv("./result/text_matching_result_ver2_emergency.csv", index=False)
+            print("\n엑셀 저장 실패로 CSV 형식으로 './result/text_matching_result_ver2_emergency.csv'에 저장되었습니다.")
         except Exception as e:
             print(f"\n모든 저장 시도 실패: {e}")
     
