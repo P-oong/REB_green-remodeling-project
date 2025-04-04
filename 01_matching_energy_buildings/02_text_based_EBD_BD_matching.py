@@ -57,10 +57,14 @@ def preprocess_data(ebd_df, bd_df):
             # 토큰화된 컬럼 생성
             ebd_processed[f'{col}_tokens'] = ebd_processed[col].apply(preprocess_text)
     
-    # EBD 통합 토큰 생성 (중복 제거)
+    # 주소 토큰에서 앞 3개 토큰(행정구역 정보) 제외 및 숫자만 있는 토큰 제거
+    ebd_processed['주소_tokens'] = ebd_processed['주소_tokens'].apply(
+        lambda tokens: [token for token in (tokens[3:] if len(tokens) >= 3 else tokens) if not token.isdigit()]
+    )
+    
+    # EBD 통합 토큰 생성 (중복 제거) - 기관명 제외, 건축물명과 주소 토큰만 사용
     ebd_processed['ebd_unified_tokens'] = ebd_processed.apply(
         lambda row: list(set(
-            (row.get('기관명_tokens', []) or []) + 
             (row.get('건축물명_tokens', []) or []) + 
             (row.get('주소_tokens', []) or [])
         )),
@@ -84,10 +88,11 @@ def preprocess_data(ebd_df, bd_df):
         sample_ebd = ebd_processed[['SEQ_NO', '기관명', '건축물명', '주소', 'ebd_unified_tokens']].head(2)
         for _, row in sample_ebd.iterrows():
             print(f"SEQ_NO: {row['SEQ_NO']}")
-            print(f"기관명: {row['기관명']} -> 토큰: {row.get('기관명_tokens', [])}")
+            print(f"기관명: {row['기관명']} -> 토큰: {row.get('기관명_tokens', [])} (통합 토큰에서 제외됨)")
             print(f"건축물명: {row['건축물명']} -> 토큰: {row.get('건축물명_tokens', [])}")
-            print(f"주소: {row['주소']} -> 토큰: {row.get('주소_tokens', [])}")
-            print(f"통합 토큰: {row['ebd_unified_tokens']}")
+            print(f"주소: {row['주소']} -> 원본 토큰: {preprocess_text(row['주소'])}")
+            print(f"주소 토큰 (앞 3개 제외, 숫자 제외): {row.get('주소_tokens', [])}")
+            print(f"통합 토큰 (기관명 제외): {row['ebd_unified_tokens']}")
             print()
     
     print("\nBD 토큰화 결과 샘플:")
@@ -422,20 +427,20 @@ def main():
     
     # 안전한 파일 저장 (권한 오류 방지)
     try:
-        final_result.to_excel("./result/text_matching_result_ver2.xlsx", index=False)
-        print("\n최종 결과가 './result/text_matching_result_ver2.xlsx'에 저장되었습니다.")
+        final_result.to_excel("./result/text_matching_result_ver3.xlsx", index=False)
+        print("\n최종 결과가 './result/text_matching_result_ver3.xlsx'에 저장되었습니다.")
     except PermissionError:
         # 파일이 열려있는 경우 다른 이름으로 저장 시도
         try:
-            final_result.to_excel("./result/text_matching_result_ver2_new.xlsx", index=False)
-            print("\n파일 권한 문제로 './result/text_matching_result_ver2_new.xlsx'에 저장되었습니다.")
+            final_result.to_excel("./result/text_matching_result_ver3_new.xlsx", index=False)
+            print("\n파일 권한 문제로 './result/text_matching_result_ver3_new.xlsx'에 저장되었습니다.")
         except Exception as e:
             print(f"\n파일 저장 중 오류 발생: {e}")
             
         # 마지막 시도: CSV 형식으로 저장
         try:
-            final_result.to_csv("./result/text_matching_result_ver2_emergency.csv", index=False)
-            print("\n엑셀 저장 실패로 CSV 형식으로 './result/text_matching_result_ver2_emergency.csv'에 저장되었습니다.")
+            final_result.to_csv("./result/text_matching_result_ver3_emergency.csv", index=False)
+            print("\n엑셀 저장 실패로 CSV 형식으로 './result/text_matching_result_ver3_emergency.csv'에 저장되었습니다.")
         except Exception as e:
             print(f"\n모든 저장 시도 실패: {e}")
     
