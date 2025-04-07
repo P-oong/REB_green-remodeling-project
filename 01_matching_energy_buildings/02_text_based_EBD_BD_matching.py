@@ -49,8 +49,8 @@ def preprocess_data(ebd_df, bd_df):
     # EBD 데이터 복사
     ebd_processed = ebd_df.copy()
     
-    # EBD 텍스트 컬럼 처리 (기관명, 건축물명, 주소)
-    for col in ['기관명', '건축물명', '주소']:
+    # EBD 텍스트 컬럼 처리 (건축물명, 주소만 토큰화)
+    for col in ['건축물명', '주소']:
         if col in ebd_processed.columns:
             # 문자열 소문자화
             ebd_processed[col] = ebd_processed[col].astype(str).str.lower()
@@ -85,14 +85,13 @@ def preprocess_data(ebd_df, bd_df):
     # 토큰화 결과 샘플 출력
     print("\nEBD 토큰화 결과 샘플:")
     if 'ebd_unified_tokens' in ebd_processed.columns:
-        sample_ebd = ebd_processed[['SEQ_NO', '기관명', '건축물명', '주소', 'ebd_unified_tokens']].head(2)
+        sample_ebd = ebd_processed[['SEQ_NO', '건축물명', '주소', 'ebd_unified_tokens']].head(2)
         for _, row in sample_ebd.iterrows():
             print(f"SEQ_NO: {row['SEQ_NO']}")
-            print(f"기관명: {row['기관명']} -> 토큰: {row.get('기관명_tokens', [])} (통합 토큰에서 제외됨)")
             print(f"건축물명: {row['건축물명']} -> 토큰: {row.get('건축물명_tokens', [])}")
             print(f"주소: {row['주소']} -> 원본 토큰: {preprocess_text(row['주소'])}")
             print(f"주소 토큰 (앞 3개 제외, 숫자 제외): {row.get('주소_tokens', [])}")
-            print(f"통합 토큰 (기관명 제외): {row['ebd_unified_tokens']}")
+            print(f"통합 토큰: {row['ebd_unified_tokens']}")
             print()
     
     print("\nBD 토큰화 결과 샘플:")
@@ -395,12 +394,12 @@ def main():
     os.makedirs("./result", exist_ok=True)
     
     # 원하는 컬럼 순서 정의
-    desired_columns = ['SEQ_NO', 'RECAP_PK', '연면적', '사용승인연도', '기관명', '건축물명', '주소', '지상', '지하',
+    desired_columns = ['SEQ_NO', 'RECAP_PK', '연면적', '사용승인연도', '건축물명', '주소', '지상', '지하',
         'TOTAREA', 'BLD_NM', 'DONG_NM', 'USE_DATE', 'MGM_BLD_PK', 'MATCH_STAGE', 'MATCH_TOKEN_COUNT',
         'EBD_COUNT', 'BD_COUNT', 'EBD_OVER_BD']
     
     # 토큰 컬럼
-    token_columns = ['ebd_unified_tokens', '기관명_tokens', '건축물명_tokens', '주소_tokens', 
+    token_columns = ['ebd_unified_tokens', '건축물명_tokens', '주소_tokens', 
                     'BLD_NM_tokens', 'DONG_NM_tokens', 'MATCHED_BLD_TOKENS', 'MATCHED_DONG_TOKENS']
     
     # 최종 컬럼 순서 구성
