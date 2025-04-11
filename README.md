@@ -14,9 +14,9 @@
 ## 작업 목록
 | 번호 | 작업명 | 설명 | 주요 기술 |
 |------|--------|------|------------|
-| 01 | [에너지소비량-건물 매칭](./01_matching_energy_buildings) | 에너지소비량 보고 건물과 개별표제부 매칭 작업 | Python, Pandas, NLP, GPT-4 |
-| 02 | [에너지소비량-계량기 매칭](./02_matching_Econsumption_meter) | 건물별 계량기 정보와 에너지 소비량 데이터 매칭 | Python, Data Validation, Time Series Analysis |
-| 03 | [통합 원가명세서 자동화](./03_Integrated_cost_statement_automation) | 그린리모델링 사업 원가명세서 작성 자동화 | Python, VBA |
+| 01 | [에너지소비량-건물 매칭](./01_matching_energy_buildings) | 에너지소비량 보고 건물과 개별표제부 매칭 작업 | Python, Pandas, Data Cleaning, Pipeline, GPT-API |
+| 02 | [에너지소비량-계량기 매칭](./02_matching_Econsumption_meter) | 건물별 계량기 정보와 에너지 소비량 데이터 매칭 | Python, Pandas, Data Cleaning, Time Series Analysis |
+| 03 | [통합 원가명세서 시트 통합 업무 자동화](./03_Integrated_cost_statement_automation) | 그린리모델링 사업 원가명세서 작성 자동화 | Python, VBA |
 | 04 | [추후 작업 예정] | - 건물 에너지 성능 예측 모델 개발<br>- 실시간 모니터링 시스템 구축<br>- 에너지 효율 개선 가이드라인 수립 | - Machine Learning<br>- IoT, Real-time Processing<br>- Data Analytics |
 
 ## 주요 기술 스택
@@ -44,6 +44,7 @@
 - OCR (Tesseract, EasyOCR): 문서 텍스트 추출
 - PDF Processing (PyPDF2, pdf2image): PDF 파일 처리
 - Automation (Selenium, PyAutoGUI): 웹 자동화
+- Excel: 문서화, VBA
 
 ## 프로젝트 구조
 ```bash
