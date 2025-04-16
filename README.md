@@ -6,11 +6,12 @@
 
 ### 주요 담당 업무
 1. 공공 건물 에너지 최적화 계량기 DB 구축을 위한 데이터 전처리 로직 개발
-2. 건물 및 에너지 데이터 분석
+2. 건물 및 에너지 데이터 분석 (EDA, 통계, 시각화 등)
 3. 각종 행정 업무 자동화
 4. 그린리모델링 성과평가 시각화 최적화
 5. 통계, 머신러닝, 시계열 모델링 보조
 6. LangGraph & MCP server 기반 업무용 Q&A 챗봇 제작
+
 
 - **인턴 기간**: 2025년 3월 4일 ~ 2025년 6월 23일 (4개월)
 
@@ -61,10 +62,12 @@
 ```bash
 REB_green-remodeling-project
 │
-├── 00_environment/                # 공통 환경 파일 및 가이드
-│   ├── environment.yml            # Conda 환경 파일
-│   ├── requirements.txt           # pip 패키지 목록
-│   └── README.md                  # 환경 세팅 가이드
+├── 00_양식/                # 추후 작업 양식
+│   ├── data/                      # 원본/가공 데이터
+│   ├── notebooks/                 # 분석/가공 노트북
+│   ├── src/                       # Python 모듈
+│   ├── README.md                  # 작업 설명
+│   └── result/                    # 산출물              
 │
 ├── 01_matching_energy_buildings/  # 에너지소비량-건물 매칭
 │   ├── data/                      # 원본/가공 데이터
@@ -87,8 +90,11 @@ REB_green-remodeling-project
 │   ├── README.md                  # 작업 설명
 │   └── result/                    # 산출물
 │
+├── .environment.yaml                    
+├── .requirements.txt                    
 ├── .gitignore                     # Git 무시 파일
 └── README.md                      # 프로젝트 설명
+
 ```
 
 ## 환경 구축
