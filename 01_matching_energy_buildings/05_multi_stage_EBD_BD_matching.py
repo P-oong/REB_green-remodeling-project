@@ -195,8 +195,8 @@ def run_step_matching(ebd_row, bd_candidates, step, matched_bd_pks):
     5차: 연면적 ±1% 이내
     6차: 연면적 ±5% 이내 + 사용승인연도 일치
     7차: 연면적 ±5% 이내 + 텍스트 토큰 매칭
-    8차: 연면적 ±5% 이내
-    9차: 텍스트 토큰 매칭만
+    8차: 텍스트 토큰 매칭만
+    9차: 연면적 ±5% 이내
     10차: RECAP 단위로 EBD와 BD가 각각 1건씩인 경우
     """
     # 이미 매칭된 BD 제외
@@ -258,14 +258,14 @@ def run_step_matching(ebd_row, bd_candidates, step, matched_bd_pks):
             if area_match and token_match:
                 candidates.append(bd_row)
                 
-    elif step == 8:  # 8차: 연면적 ±5% 이내
-        for _, bd_row in bd_candidates.iterrows():
-            if is_within_percentage(ebd_row['연면적'], bd_row['TOTAREA'], 5):
-                candidates.append(bd_row)
-                
-    elif step == 9:  # 9차: 텍스트 토큰 매칭만
+    elif step == 8:  # 8차: 텍스트 토큰 매칭만
         for _, bd_row in bd_candidates.iterrows():
             if has_token_match(ebd_row['ebd_tokens'], bd_row):
+                candidates.append(bd_row)
+                
+    elif step == 9:  # 9차: 연면적 ±5% 이내
+        for _, bd_row in bd_candidates.iterrows():
+            if is_within_percentage(ebd_row['연면적'], bd_row['TOTAREA'], 5):
                 candidates.append(bd_row)
     
     # 10차는 이후 로직에서 별도 처리 (RECAP 단위로 EBD와 BD가 각각 1건씩인 경우)
@@ -328,6 +328,10 @@ def match_ebd_bd(ebd_df, bd_df):
                 results.loc[i, 'USE_DATE'] = bd_match['USE_DATE']
                 results.loc[i, 'MATCH_STAGE'] = match_stage
                 
+                # 토큰 정보도 저장
+                results.loc[i, 'bld_tokens'] = bd_match['bld_tokens']
+                results.loc[i, 'dong_tokens'] = bd_match['dong_tokens']
+                
                 # 매칭된 BD 추적
                 matched_bd_pks.add(bd_match['MGM_BLD_PK'])
                 matched = True
@@ -350,6 +354,10 @@ def match_ebd_bd(ebd_df, bd_df):
                     results.loc[i, 'DONG_NM'] = bd_match['DONG_NM']
                     results.loc[i, 'USE_DATE'] = bd_match['USE_DATE']
                     results.loc[i, 'MATCH_STAGE'] = '10차'
+                    
+                    # 토큰 정보도 저장
+                    results.loc[i, 'bld_tokens'] = bd_match['bld_tokens']
+                    results.loc[i, 'dong_tokens'] = bd_match['dong_tokens']
                     
                     # 매칭된 BD 추적
                     matched_bd_pks.add(bd_match['MGM_BLD_PK'])
@@ -431,6 +439,16 @@ def main():
     # 컬럼 순서 재정렬 (존재하는 컬럼만 선택)
     existing_columns = [col for col in final_columns if col in matching_results.columns]
     final_results = matching_results[existing_columns]
+    
+    # 토큰 컬럼을 문자열로 변환 (셋을 문자열로 변환하여 가독성 향상)
+    if 'ebd_tokens' in final_results.columns:
+        final_results['ebd_tokens_str'] = final_results['ebd_tokens'].apply(lambda x: ', '.join(sorted(x)) if isinstance(x, set) else str(x))
+    
+    if 'bld_tokens' in final_results.columns:
+        final_results['bld_tokens_str'] = final_results['bld_tokens'].apply(lambda x: ', '.join(sorted(x)) if isinstance(x, set) else str(x))
+    
+    if 'dong_tokens' in final_results.columns:
+        final_results['dong_tokens_str'] = final_results['dong_tokens'].apply(lambda x: ', '.join(sorted(x)) if isinstance(x, set) else str(x))
     
     # 안전한 파일 저장
     try:
