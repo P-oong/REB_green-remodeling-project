@@ -292,6 +292,16 @@ def match_ebd_bd(ebd_df, bd_df):
     results['DONG_NM'] = None
     results['USE_DATE'] = None
     
+    # 토큰 컬럼 추가
+    results['ebd_tokens_str'] = None
+    results['bld_tokens_str'] = None
+    results['dong_tokens_str'] = None
+    
+    # EBD 토큰 문자열 변환
+    for i, ebd_row in ebd_df.iterrows():
+        ebd_tokens = ebd_row.get('ebd_tokens', set())
+        results.loc[i, 'ebd_tokens_str'] = ', '.join(sorted(ebd_tokens)) if isinstance(ebd_tokens, set) else str(ebd_tokens)
+    
     # RECAP_PK별 EBD와 BD 개수 계산
     ebd_counts = ebd_df.groupby('RECAP_PK').size().to_dict()
     bd_counts = bd_df.groupby('RECAP_PK').size().to_dict()
@@ -328,9 +338,11 @@ def match_ebd_bd(ebd_df, bd_df):
                 results.loc[i, 'USE_DATE'] = bd_match['USE_DATE']
                 results.loc[i, 'MATCH_STAGE'] = match_stage
                 
-                # 토큰 정보도 저장
-                results.loc[i, 'bld_tokens'] = bd_match['bld_tokens']
-                results.loc[i, 'dong_tokens'] = bd_match['dong_tokens']
+                # 토큰 정보를 문자열로 변환하여 저장
+                bld_tokens = bd_match['bld_tokens']
+                dong_tokens = bd_match['dong_tokens']
+                results.loc[i, 'bld_tokens_str'] = ', '.join(sorted(bld_tokens)) if isinstance(bld_tokens, set) else str(bld_tokens)
+                results.loc[i, 'dong_tokens_str'] = ', '.join(sorted(dong_tokens)) if isinstance(dong_tokens, set) else str(dong_tokens)
                 
                 # 매칭된 BD 추적
                 matched_bd_pks.add(bd_match['MGM_BLD_PK'])
@@ -355,9 +367,11 @@ def match_ebd_bd(ebd_df, bd_df):
                     results.loc[i, 'USE_DATE'] = bd_match['USE_DATE']
                     results.loc[i, 'MATCH_STAGE'] = '10차'
                     
-                    # 토큰 정보도 저장
-                    results.loc[i, 'bld_tokens'] = bd_match['bld_tokens']
-                    results.loc[i, 'dong_tokens'] = bd_match['dong_tokens']
+                    # 토큰 정보를 문자열로 변환하여 저장
+                    bld_tokens = bd_match['bld_tokens']
+                    dong_tokens = bd_match['dong_tokens']
+                    results.loc[i, 'bld_tokens_str'] = ', '.join(sorted(bld_tokens)) if isinstance(bld_tokens, set) else str(bld_tokens)
+                    results.loc[i, 'dong_tokens_str'] = ', '.join(sorted(dong_tokens)) if isinstance(dong_tokens, set) else str(dong_tokens)
                     
                     # 매칭된 BD 추적
                     matched_bd_pks.add(bd_match['MGM_BLD_PK'])
@@ -416,7 +430,7 @@ def main():
     ]
     
     # 토큰 컬럼
-    token_columns = ['ebd_tokens', 'bld_tokens', 'dong_tokens']
+    token_columns = ['ebd_tokens_str', 'bld_tokens_str', 'dong_tokens_str']
     
     # 최종 컬럼 순서 구성
     final_columns = []
@@ -440,30 +454,20 @@ def main():
     existing_columns = [col for col in final_columns if col in matching_results.columns]
     final_results = matching_results[existing_columns]
     
-    # 토큰 컬럼을 문자열로 변환 (셋을 문자열로 변환하여 가독성 향상)
-    if 'ebd_tokens' in final_results.columns:
-        final_results['ebd_tokens_str'] = final_results['ebd_tokens'].apply(lambda x: ', '.join(sorted(x)) if isinstance(x, set) else str(x))
-    
-    if 'bld_tokens' in final_results.columns:
-        final_results['bld_tokens_str'] = final_results['bld_tokens'].apply(lambda x: ', '.join(sorted(x)) if isinstance(x, set) else str(x))
-    
-    if 'dong_tokens' in final_results.columns:
-        final_results['dong_tokens_str'] = final_results['dong_tokens'].apply(lambda x: ', '.join(sorted(x)) if isinstance(x, set) else str(x))
-    
     # 안전한 파일 저장
     try:
-        final_results.to_excel("./result/multi_stage_matching_result.xlsx", index=False)
-        print("\n최종 결과가 './result/multi_stage_matching_result.xlsx'에 저장되었습니다.")
+        final_results.to_excel("./result/multi_stage_matching_result_ver2.xlsx", index=False)
+        print("\n최종 결과가 './result/multi_stage_matching_result_ver2.xlsx'에 저장되었습니다.")
     except PermissionError:
         # 파일이 열려있는 경우 다른 이름으로 저장 시도
         try:
-            final_results.to_excel("./result/multi_stage_matching_result_new.xlsx", index=False)
-            print("\n파일 권한 문제로 './result/multi_stage_matching_result_new.xlsx'에 저장되었습니다.")
+            final_results.to_excel("./result/multi_stage_matching_result_ver2.xlsx", index=False)
+            print("\n파일 권한 문제로 './result/multi_stage_matching_result_ver2.xlsx'에 저장되었습니다.")
         except Exception as e:
             print(f"\n파일 저장 중 오류 발생: {e}")
             # CSV 형식으로 저장 시도
-            final_results.to_csv("./result/multi_stage_matching_result_emergency.csv", index=False)
-            print("\nCSV 형식으로 './result/multi_stage_matching_result_emergency.csv'에 저장되었습니다.")
+            final_results.to_csv("./result/multi_stage_matching_result_ver2.csv", index=False)
+            print("\nCSV 형식으로 './result/multi_stage_matching_result_ver2.csv'에 저장되었습니다.")
     
     # 총 실행 시간 출력
     elapsed_time = time.time() - start_time
